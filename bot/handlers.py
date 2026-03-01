@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -14,6 +17,33 @@ from bot import scheduler as scheduler_jobs
 from bot.config import Employee, Settings
 from bot.db import Database
 from bot.reports import build_daily_report, build_kpi_block, build_weekly_report
+
+logger = logging.getLogger(__name__)
+
+
+ADMIN_HELP_TEXT = """🛠 <b>Админ-панель EasyWay</b>
+
+👋 Здесь можно проверить все функции бота без ожидания расписания.
+
+<b>📌 Команды:</b>
+• /status — состояние бота и runtime-настройки
+• /report today — дневной отчёт вручную
+• /week — недельный отчёт + KPI
+• /checkin — ручной check-in
+• /eod — запуск вечерней формы
+• /sale — форма продажи (только Sales чат)
+• /shipment — форма отправки (только Logistics чат)
+• /add_employee role=sales|logistics|finance|general — ответом на сообщение сотрудника
+• /set_checkin_time HH:MM — время check-in
+• /set_eod_time HH:MM — время EOD
+• /set_report_time HH:MM — время отчётов
+• /export csv — выгрузка активности за сегодня
+
+<b>🧪 Кнопки ниже:</b>
+• имитируют scheduled-задачи (check-in/eod/reports/inactivity)
+• позволяют быстро проверить интеграцию в чатах
+• дают доступ к логам (просмотр и скачивание)
+"""
 
 
 class EODStates(StatesGroup):
@@ -83,6 +113,7 @@ def build_router(settings: Settings, db: Database) -> Router:
             return
 
         db.save_checkin(user.id, today, now.isoformat(timespec="seconds"))
+        logger.info("checkin accepted user_id=%s day=%s", user.id, today)
         await callback.answer("Отметка принята ✅", show_alert=False)
 
     @router.message(Command("checkin"))
@@ -97,6 +128,7 @@ def build_router(settings: Settings, db: Database) -> Router:
             await _answer_temp(message, "Вы уже отметились сегодня ✅", delete_request=True)
             return
         db.save_checkin(user.id, today, now.isoformat(timespec="seconds"))
+        logger.info("checkin via command user_id=%s day=%s", user.id, today)
         await _answer_temp(message, "✅ Чек-ин принят", delete_request=True)
 
     @router.message(Command("eod"))
@@ -144,6 +176,7 @@ def build_router(settings: Settings, db: Database) -> Router:
         )
         await state.clear()
         await _safe_delete_message(message)
+        logger.info("eod submitted user_id=%s day=%s", uid, now.date().isoformat())
         await message.answer("✅ EOD отчёт сохранён")
 
     @router.message(Command("sale"))
@@ -202,6 +235,7 @@ def build_router(settings: Settings, db: Database) -> Router:
             created_at=now.isoformat(timespec="seconds"),
         )
         await _safe_delete_message(message)
+        logger.info("sale saved user_id=%s amount=%s status=%s", uid, data.get("amount"), data.get("status"))
         await message.answer(
             f"#sale @{message.from_user.username if message.from_user else uid} {float(data.get('amount', 0.0)):.2f}aed {data.get('status', 'lead')}"
         )
@@ -303,6 +337,7 @@ def build_router(settings: Settings, db: Database) -> Router:
         full_name = (source.full_name or "").strip() or username or str(source.id)
         db.upsert_employee(source.id, username, full_name, role)
         settings.employees[source.id] = Employee(source.id, username, full_name, role)
+        logger.info("employee upsert user_id=%s role=%s", source.id, role)
         await _answer_temp(message, f"✅ Сотрудник добавлен: {full_name} ({role})")
 
     @router.message(Command("set_checkin_time"))
@@ -311,6 +346,7 @@ def build_router(settings: Settings, db: Database) -> Router:
             return
         arg = (command.args or "").strip()
         db.set_setting("checkin_time", arg)
+        logger.info("setting updated checkin_time=%s", arg)
         await _answer_temp(message, f"checkin_time updated: {arg}")
 
     @router.message(Command("set_eod_time"))
@@ -319,6 +355,7 @@ def build_router(settings: Settings, db: Database) -> Router:
             return
         arg = (command.args or "").strip()
         db.set_setting("eod_time", arg)
+        logger.info("setting updated eod_time=%s", arg)
         await _answer_temp(message, f"eod_time updated: {arg}")
 
     @router.message(Command("set_report_time"))
@@ -327,6 +364,7 @@ def build_router(settings: Settings, db: Database) -> Router:
             return
         arg = (command.args or "").strip()
         db.set_setting("report_time", arg)
+        logger.info("setting updated report_time=%s", arg)
         await _answer_temp(message, f"report_time updated: {arg}")
 
     @router.message(Command("export"))
@@ -342,12 +380,19 @@ def build_router(settings: Settings, db: Database) -> Router:
         await _safe_delete_message(message)
         await message.answer_document(FSInputFile(path))
 
-    @router.message(Command("admin_test"))
-    async def cmd_admin_test(message: Message) -> None:
+    @router.message(Command("admin"))
+    async def cmd_admin(message: Message) -> None:
         if not _is_owner(message, settings):
             return
         await _safe_delete_message(message)
-        await message.answer("🧪 Admin test menu", reply_markup=_admin_test_kb())
+        await message.answer(ADMIN_HELP_TEXT, parse_mode="HTML", reply_markup=_admin_test_kb())
+
+    @router.message(Command("admin_test"))
+    async def cmd_admin_alias(message: Message) -> None:
+        if not _is_owner(message, settings):
+            return
+        await _safe_delete_message(message)
+        await message.answer(ADMIN_HELP_TEXT, parse_mode="HTML", reply_markup=_admin_test_kb())
 
     @router.callback_query(F.data.startswith("admtest:"))
     async def admin_test_callback(callback: CallbackQuery) -> None:
@@ -358,29 +403,50 @@ def build_router(settings: Settings, db: Database) -> Router:
         action = (callback.data or "").split(":", 1)[1]
         bot = callback.bot
 
-        if action == "checkin_prompt":
-            await scheduler_jobs._send_checkin_prompt(bot, settings, db)
-        elif action == "checkin_missing":
-            await scheduler_jobs._send_checkin_missing(bot, settings, db)
-        elif action == "eod_prompt":
-            await scheduler_jobs._send_eod_prompt(bot, settings)
-        elif action == "eod_missing":
-            await scheduler_jobs._send_eod_missing(bot, settings, db)
-        elif action == "daily":
-            await scheduler_jobs._send_daily_report(bot, settings, db)
-        elif action == "weekly":
-            await scheduler_jobs._send_weekly_report(bot, settings, db)
-        elif action == "inactivity":
-            await scheduler_jobs._check_inactivity(bot, settings, db)
-        elif action == "menu":
-            await callback.message.edit_text("🧪 Admin test menu", reply_markup=_admin_test_kb())
-            await callback.answer("Меню обновлено")
+        try:
+            if action == "checkin_prompt":
+                await scheduler_jobs._send_checkin_prompt(bot, settings, db)
+            elif action == "checkin_missing":
+                await scheduler_jobs._send_checkin_missing(bot, settings, db)
+            elif action == "eod_prompt":
+                await scheduler_jobs._send_eod_prompt(bot, settings)
+            elif action == "eod_missing":
+                await scheduler_jobs._send_eod_missing(bot, settings, db)
+            elif action == "daily":
+                await scheduler_jobs._send_daily_report(bot, settings, db)
+            elif action == "weekly":
+                await scheduler_jobs._send_weekly_report(bot, settings, db)
+            elif action == "inactivity":
+                await scheduler_jobs._check_inactivity(bot, settings, db)
+            elif action == "menu":
+                await callback.answer("♻️ Меню уже актуально")
+                return
+            elif action == "logs_tail":
+                tail = _read_log_tail(lines=50)
+                await callback.message.answer(f"📄 <b>Последние 50 строк лога</b>\n\n<pre>{tail}</pre>", parse_mode="HTML")
+            elif action == "logs_file":
+                log_path = Path("logs") / "bot.log"
+                if not log_path.exists():
+                    await callback.answer("Лог-файл пока не создан", show_alert=True)
+                    return
+                await callback.message.answer_document(FSInputFile(str(log_path)))
+            else:
+                await callback.answer("Неизвестная команда", show_alert=True)
+                return
+        except TelegramBadRequest as exc:
+            if "message is not modified" in str(exc).lower():
+                await callback.answer("♻️ Нечего обновлять")
+                return
+            logger.exception("TelegramBadRequest in admin callback action=%s", action)
+            await callback.answer("Ошибка Telegram API", show_alert=True)
             return
-        else:
-            await callback.answer("Неизвестная команда", show_alert=True)
+        except Exception:
+            logger.exception("admin callback failed action=%s", action)
+            await callback.answer("⚠️ Внутренняя ошибка, смотри логи", show_alert=True)
             return
 
-        await callback.answer("Выполнено")
+        logger.info("admin action executed action=%s by=%s", action, callback.from_user.id)
+        await callback.answer("✅ Выполнено")
 
     return router
 
@@ -403,6 +469,7 @@ async def _finish_shipment(
         delay_reason=delay_reason,
         created_at=now.isoformat(timespec="seconds"),
     )
+    logger.info("shipment saved user_id=%s status=%s", uid, data.get("status"))
     await message.answer(f"📦 shipment logged: {data.get('client_number')} status={data.get('status')}")
     await state.clear()
 
@@ -434,16 +501,32 @@ async def _answer_temp(message: Message, text: str, delete_request: bool = True,
 def _admin_test_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Check-in prompt", callback_data="admtest:checkin_prompt")],
-            [InlineKeyboardButton(text="Check-in missing", callback_data="admtest:checkin_missing")],
-            [InlineKeyboardButton(text="EOD prompt", callback_data="admtest:eod_prompt")],
-            [InlineKeyboardButton(text="EOD missing", callback_data="admtest:eod_missing")],
-            [InlineKeyboardButton(text="Daily report", callback_data="admtest:daily")],
-            [InlineKeyboardButton(text="Weekly report + KPI", callback_data="admtest:weekly")],
-            [InlineKeyboardButton(text="Run inactivity check", callback_data="admtest:inactivity")],
-            [InlineKeyboardButton(text="Refresh menu", callback_data="admtest:menu")],
+            [InlineKeyboardButton(text="🚀 Отправить Check-in кнопку", callback_data="admtest:checkin_prompt")],
+            [InlineKeyboardButton(text="📋 Показать, кто НЕ чек-ин", callback_data="admtest:checkin_missing")],
+            [InlineKeyboardButton(text="🌆 Отправить EOD напоминание", callback_data="admtest:eod_prompt")],
+            [InlineKeyboardButton(text="📭 Показать, кто НЕ сдал EOD", callback_data="admtest:eod_missing")],
+            [InlineKeyboardButton(text="📊 Отправить Daily report", callback_data="admtest:daily")],
+            [InlineKeyboardButton(text="🗓 Отправить Weekly + KPI", callback_data="admtest:weekly")],
+            [InlineKeyboardButton(text="⚠️ Запустить проверку неактивности", callback_data="admtest:inactivity")],
+            [
+                InlineKeyboardButton(text="📄 Показать последние 50 строк лога", callback_data="admtest:logs_tail"),
+            ],
+            [InlineKeyboardButton(text="⬇️ Скачать лог-файл", callback_data="admtest:logs_file")],
+            [InlineKeyboardButton(text="♻️ Обновить меню", callback_data="admtest:menu")],
         ]
     )
+
+
+def _read_log_tail(lines: int = 50) -> str:
+    path = Path("logs") / "bot.log"
+    if not path.exists():
+        return "Лог-файл пока пуст или не создан."
+    content = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    tail = content[-lines:]
+    if not tail:
+        return "Лог-файл пуст."
+    text = "\n".join(tail)
+    return text[-3900:]
 
 
 def _parse_role_from_args(raw: str) -> str | None:
