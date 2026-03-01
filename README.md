@@ -178,20 +178,15 @@ cp .env.example .env
 Минимально обязательные:
 - `BOT_TOKEN`
 - `OWNER_IDS`
-- `ADMIN_CHAT_ID`
-- `WORK_CHAT_IDS`
-- `EMPLOYEES_JSON`
 
-Рекомендуемые для полного функционала:
-- `GENERAL_CHAT_ID`
-- `SALES_CHAT_ID`
-- `LOGISTICS_CHAT_ID`
-- `REPORT_TIME`
-- `CHECKIN_TIME`
-- `EOD_TIME`
-- `WORK_START`
-- `WORK_END`
-- `INACTIVITY_MINUTES`
+Остальные настройки теперь можно задать из меню `/admin` (кнопками), поэтому в `.env` их держать не обязательно.
+
+Опционально можно оставить bootstrap-значения:
+- `ADMIN_CHAT_ID`, `GENERAL_CHAT_ID`, `SALES_CHAT_ID`, `LOGISTICS_CHAT_ID`
+- `WORK_CHAT_IDS`
+- `REPORT_TIME`, `CHECKIN_TIME`, `EOD_TIME`
+- `WORK_START`, `WORK_END`, `INACTIVITY_MINUTES`
+- `EMPLOYEES_JSON`
 - `TIMEZONE=Asia/Dubai`
 
 Пример `EMPLOYEES_JSON`:

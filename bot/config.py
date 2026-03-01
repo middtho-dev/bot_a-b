@@ -48,15 +48,8 @@ def _parse_hhmm(raw: str, default: str) -> time:
 
 
 def _load_timezone(raw: str) -> ZoneInfo:
-    """Load IANA timezone with backward-compatible alias for Dubai.
-
-    The IANA key for Dubai is `Asia/Dubai`.
-    `Europe/Dubai` is invalid but appeared in initial docs/spec, so map it.
-    """
     source = (raw or "Asia/Dubai").strip()
-    aliases = {
-        "Europe/Dubai": "Asia/Dubai",
-    }
+    aliases = {"Europe/Dubai": "Asia/Dubai"}
     return ZoneInfo(aliases.get(source, source))
 
 
@@ -74,12 +67,10 @@ def load_settings() -> Settings:
         raise ValueError("OWNER_IDS is required")
 
     admin_chat_id = int(os.getenv("ADMIN_CHAT_ID", "0"))
-    if not admin_chat_id:
-        raise ValueError("ADMIN_CHAT_ID is required")
-
+    general_chat_id = int(os.getenv("GENERAL_CHAT_ID", "0"))
+    sales_chat_id = int(os.getenv("SALES_CHAT_ID", "0"))
+    logistics_chat_id = int(os.getenv("LOGISTICS_CHAT_ID", "0"))
     work_chat_ids = _parse_csv_int(os.getenv("WORK_CHAT_IDS", ""))
-    if not work_chat_ids:
-        raise ValueError("WORK_CHAT_IDS is required")
 
     report_time = _parse_hhmm(os.getenv("REPORT_TIME", "19:00"), "19:00")
     checkin_time = _parse_hhmm(os.getenv("CHECKIN_TIME", "10:00"), "10:00")
@@ -89,10 +80,6 @@ def load_settings() -> Settings:
     inactivity_minutes = int(os.getenv("INACTIVITY_MINUTES", "60"))
 
     db_path = os.getenv("DATABASE_PATH", "bot_data.sqlite3")
-
-    general_chat_id = int(os.getenv("GENERAL_CHAT_ID", "0"))
-    sales_chat_id = int(os.getenv("SALES_CHAT_ID", "0"))
-    logistics_chat_id = int(os.getenv("LOGISTICS_CHAT_ID", "0"))
 
     raw_employees = os.getenv("EMPLOYEES_JSON", "[]")
     parsed = json.loads(raw_employees)
@@ -105,9 +92,6 @@ def load_settings() -> Settings:
             role=item.get("role", "general").lower(),
         )
         employees[employee.user_id] = employee
-
-    if not employees:
-        raise ValueError("EMPLOYEES_JSON must contain at least one employee")
 
     return Settings(
         bot_token=bot_token,
