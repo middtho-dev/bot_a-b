@@ -48,6 +48,7 @@
 ## Быстрый запуск в контейнере
 
 ```bash
+# в .env используйте TIMEZONE=Asia/Dubai
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -85,7 +86,7 @@ bot/
 
 ## Troubleshooting (Ubuntu 24+/Python 3.12)
 
-Если при запуске видите ошибку `ZoneInfoNotFoundError: No time zone found with key Europe/Dubai`, установите timezone data:
+Если при запуске видите ошибку `ZoneInfoNotFoundError: No time zone found with key Asia/Dubai`, установите timezone data:
 
 ```bash
 # вариант 1: системно

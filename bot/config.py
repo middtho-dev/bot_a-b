@@ -47,6 +47,19 @@ def _parse_hhmm(raw: str, default: str) -> time:
     return time(hour=int(hh), minute=int(mm))
 
 
+def _load_timezone(raw: str) -> ZoneInfo:
+    """Load IANA timezone with backward-compatible alias for Dubai.
+
+    The IANA key for Dubai is `Asia/Dubai`.
+    `Europe/Dubai` is invalid but appeared in initial docs/spec, so map it.
+    """
+    source = (raw or "Asia/Dubai").strip()
+    aliases = {
+        "Europe/Dubai": "Asia/Dubai",
+    }
+    return ZoneInfo(aliases.get(source, source))
+
+
 def load_settings() -> Settings:
     load_dotenv()
 
@@ -54,7 +67,7 @@ def load_settings() -> Settings:
     if not bot_token:
         raise ValueError("BOT_TOKEN is required")
 
-    timezone = ZoneInfo(os.getenv("TIMEZONE", "Europe/Dubai"))
+    timezone = _load_timezone(os.getenv("TIMEZONE", "Asia/Dubai"))
 
     owner_ids = _parse_csv_int(os.getenv("OWNER_IDS", ""))
     if not owner_ids:
