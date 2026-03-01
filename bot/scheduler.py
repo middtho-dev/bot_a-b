@@ -76,7 +76,7 @@ async def _send_checkin_prompt(bot: Bot, settings: Settings, db: Database) -> No
         "Подтвердите начало рабочего дня\nКнопка актуальна только сегодня. Также можно командой /checkin",
         reply_markup=kb,
     )
-    logger.info("🌅 Отправлен check-in prompt")
+    logger.info("🌅 Отправлено напоминание о чек-ине")
 
 
 async def _send_checkin_missing(bot: Bot, settings: Settings, db: Database) -> None:
@@ -86,7 +86,7 @@ async def _send_checkin_missing(bot: Bot, settings: Settings, db: Database) -> N
     today = datetime.now(settings.timezone).date().isoformat()
     checked = db.checked_in_user_ids(today)
     missing = [f"@{emp.username}" if emp.username else emp.full_name for uid, emp in settings.employees.items() if uid not in checked]
-    await bot.send_message(admin_chat_id, build_missing_report("Check-in", today, missing))
+    await bot.send_message(admin_chat_id, build_missing_report("Чек-ин", today, missing))
 
 
 async def _send_eod_prompt(bot: Bot, settings: Settings, db: Database) -> None:
