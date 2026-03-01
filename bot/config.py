@@ -93,6 +93,18 @@ def load_settings() -> Settings:
         )
         employees[employee.user_id] = employee
 
+
+    # Ensure owners are always available in employee registry by default
+    for owner_id in owner_ids:
+        if owner_id in employees:
+            continue
+        employees[owner_id] = Employee(
+            user_id=owner_id,
+            username=f"owner_{owner_id}",
+            full_name=f"Owner {owner_id}",
+            role="general",
+        )
+
     return Settings(
         bot_token=bot_token,
         timezone=timezone,

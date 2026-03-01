@@ -39,6 +39,12 @@ async def run() -> None:
     settings = load_settings()
     db = Database(settings.db_path)
 
+    # persist owner bootstrap employees into DB so runtime/admin tools see them consistently
+    for owner_id in settings.owner_ids:
+        if owner_id in settings.employees:
+            emp = settings.employees[owner_id]
+            db.upsert_employee(emp.user_id, emp.username, emp.full_name, emp.role)
+
     # merge runtime employees persisted via /add_employee
     for row in db.get_all_employees():
         settings.employees[int(row["user_id"])] = Employee(

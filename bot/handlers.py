@@ -275,7 +275,7 @@ def build_router(settings: Settings, db: Database) -> Router:
 
     @router.message(Command("status"))
     async def cmd_status(message: Message) -> None:
-        if not _is_owner(message, settings):
+        if not await _ensure_owner(message, settings):
             return
         runtime = get_runtime_config(settings, db)
         cfg = _build_runtime_overview(db, settings)
@@ -283,7 +283,7 @@ def build_router(settings: Settings, db: Database) -> Router:
 
     @router.message(Command("report"))
     async def cmd_report(message: Message, command: CommandObject) -> None:
-        if not _is_owner(message, settings):
+        if not await _ensure_owner(message, settings):
             return
         if (command.args or "").strip().lower() != "today":
             await _answer_temp(message, "Usage: /report today")
@@ -294,7 +294,7 @@ def build_router(settings: Settings, db: Database) -> Router:
 
     @router.message(Command("week"))
     async def cmd_week(message: Message) -> None:
-        if not _is_owner(message, settings):
+        if not await _ensure_owner(message, settings):
             return
         today = datetime.now(settings.timezone).date()
         start = today - timedelta(days=6)
@@ -304,7 +304,7 @@ def build_router(settings: Settings, db: Database) -> Router:
 
     @router.message(Command("add_employee"))
     async def cmd_add_employee(message: Message, command: CommandObject) -> None:
-        if not _is_owner(message, settings):
+        if not await _ensure_owner(message, settings):
             return
 
         role = _parse_role_from_args(command.args or "")
@@ -326,7 +326,7 @@ def build_router(settings: Settings, db: Database) -> Router:
 
     @router.message(Command("set_checkin_time"))
     async def cmd_set_checkin(message: Message, command: CommandObject) -> None:
-        if not _is_owner(message, settings):
+        if not await _ensure_owner(message, settings):
             return
         arg = (command.args or "").strip()
         db.set_setting("checkin_time", arg)
@@ -335,7 +335,7 @@ def build_router(settings: Settings, db: Database) -> Router:
 
     @router.message(Command("set_eod_time"))
     async def cmd_set_eod(message: Message, command: CommandObject) -> None:
-        if not _is_owner(message, settings):
+        if not await _ensure_owner(message, settings):
             return
         arg = (command.args or "").strip()
         db.set_setting("eod_time", arg)
@@ -344,7 +344,7 @@ def build_router(settings: Settings, db: Database) -> Router:
 
     @router.message(Command("set_report_time"))
     async def cmd_set_report(message: Message, command: CommandObject) -> None:
-        if not _is_owner(message, settings):
+        if not await _ensure_owner(message, settings):
             return
         arg = (command.args or "").strip()
         db.set_setting("report_time", arg)
@@ -353,7 +353,7 @@ def build_router(settings: Settings, db: Database) -> Router:
 
     @router.message(Command("export"))
     async def cmd_export(message: Message, command: CommandObject) -> None:
-        if not _is_owner(message, settings):
+        if not await _ensure_owner(message, settings):
             return
         if (command.args or "").strip().lower() != "csv":
             await _answer_temp(message, "Usage: /export csv")
@@ -364,16 +364,30 @@ def build_router(settings: Settings, db: Database) -> Router:
         await _safe_delete_message(message)
         await message.answer_document(FSInputFile(path))
 
+
+    @router.message(Command("whoami"))
+    async def cmd_whoami(message: Message) -> None:
+        user_id = message.from_user.id if message.from_user else None
+        sender_chat_id = message.sender_chat.id if message.sender_chat else None
+        await message.answer(
+            "🪪 Диагностика пользователя\n"
+            f"from_user.id={user_id}\n"
+            f"sender_chat.id={sender_chat_id}\n"
+            f"OWNER_IDS={sorted(settings.owner_ids)}\n\n"
+            "Если from_user.id не совпадает с OWNER_IDS, owner-команды будут игнорироваться.\n"
+            "Если вы админ с анонимным режимом, выключите Anonymous Admin и повторите."
+        )
+
     @router.message(Command("admin"))
     async def cmd_admin(message: Message) -> None:
-        if not _is_owner(message, settings):
+        if not await _ensure_owner(message, settings):
             return
         await _safe_delete_message(message)
         await message.answer(ADMIN_HELP_TEXT, parse_mode="HTML", reply_markup=_admin_kb())
 
     @router.message(Command("admin_test"))
     async def cmd_admin_alias(message: Message) -> None:
-        if not _is_owner(message, settings):
+        if not await _ensure_owner(message, settings):
             return
         await _safe_delete_message(message)
         await message.answer(ADMIN_HELP_TEXT, parse_mode="HTML", reply_markup=_admin_kb())
@@ -665,6 +679,24 @@ def _is_hhmm(raw: str) -> bool:
         return 0 <= h <= 23 and 0 <= m <= 59
     except Exception:
         return False
+
+
+async def _ensure_owner(message: Message, settings: Settings) -> bool:
+    if _is_owner(message, settings):
+        return True
+
+    user_id = message.from_user.id if message.from_user else None
+    sender_chat_id = message.sender_chat.id if message.sender_chat else None
+    await _answer_temp(
+        message,
+        "⛔ Команда только для owner.\n"
+        f"Ваш from_user.id={user_id}, sender_chat.id={sender_chat_id}.\n"
+        f"OWNER_IDS={sorted(settings.owner_ids)}\n"
+        "💡 Если вы анонимный админ в группе, отключите Anonymous Admin.",
+        delete_request=False,
+        ttl=30,
+    )
+    return False
 
 
 def _is_owner(message: Message, settings: Settings) -> bool:
