@@ -232,7 +232,7 @@ def build_router(settings: Settings, db: Database) -> Router:
             await state.set_state(EODStates.done_today)
             await message.answer("Вечерний отчёт\n1) Сделано сегодня?")
             return
-        await message.answer("👋 Бот активен. Для админ-меню используйте /admin")
+        await message.answer("👋 Бот активен. Для меню администратора используйте /admin")
 
     @router.message(Command("myid"))
     async def cmd_myid(message: Message) -> None:
@@ -247,9 +247,9 @@ def build_router(settings: Settings, db: Database) -> Router:
     async def cmd_chatinfo(message: Message) -> None:
         title = message.chat.title or message.chat.full_name or "(без названия)"
         await message.answer(
-            f"💬 Chat info\n"
-            f"• title: {title}\n"
-            f"• type: {message.chat.type}\n"
+            f"💬 Информация о чате\n"
+            f"• название: {title}\n"
+            f"• тип: {message.chat.type}\n"
             f"• id: <code>{message.chat.id}</code>",
             parse_mode="HTML",
         )
@@ -304,7 +304,7 @@ def build_router(settings: Settings, db: Database) -> Router:
             return
         await _safe_delete_message(message)
         await state.set_state(SaleStates.client)
-        await message.answer("Sale: Клиент?")
+        await message.answer("💰 Продажа: клиент?")
 
     @router.message(SaleStates.client)
     async def sale_client(message: Message, state: FSMContext) -> None:
@@ -365,7 +365,7 @@ def build_router(settings: Settings, db: Database) -> Router:
             return
         await _safe_delete_message(message)
         await state.set_state(ShipmentStates.client_number)
-        await message.answer("Shipment: Номер клиента?")
+        await message.answer("📦 Отправка: номер клиента?")
 
     @router.message(ShipmentStates.client_number)
     async def shipment_client(message: Message, state: FSMContext) -> None:
@@ -399,14 +399,14 @@ def build_router(settings: Settings, db: Database) -> Router:
             return
         runtime = get_runtime_config(settings, db)
         cfg = _build_runtime_overview(db, settings)
-        await _answer_temp(message, f"✅ Bot is running\nreport={runtime.report_time}, checkin={runtime.checkin_time}, eod={runtime.eod_time}, inactivity={runtime.inactivity_minutes}m\n\n{cfg}", ttl=30)
+        await _answer_temp(message, f"✅ Бот работает\nreport={runtime.report_time}, checkin={runtime.checkin_time}, eod={runtime.eod_time}, inactivity={runtime.inactivity_minutes} мин\n\n{cfg}", ttl=30)
 
     @router.message(Command("report"))
     async def cmd_report(message: Message, command: CommandObject) -> None:
         if not await _ensure_owner(message, settings):
             return
         if (command.args or "").strip().lower() != "today":
-            await _answer_temp(message, "Usage: /report today")
+            await _answer_temp(message, "Использование: /report today")
             return
         today = datetime.now(settings.timezone).date()
         await _safe_delete_message(message)
@@ -429,7 +429,7 @@ def build_router(settings: Settings, db: Database) -> Router:
 
         role = _parse_role_from_args(command.args or "")
         if role is None:
-            await _answer_temp(message, "Usage: reply to a user with /add_employee role=sales|logistics|finance|general")
+            await _answer_temp(message, "Использование: ответьте на сообщение сотрудника командой /add_employee role=sales|logistics|finance|general")
             return
 
         source = message.reply_to_message.from_user if message.reply_to_message else None
@@ -476,7 +476,7 @@ def build_router(settings: Settings, db: Database) -> Router:
         if not await _ensure_owner(message, settings):
             return
         if (command.args or "").strip().lower() != "csv":
-            await _answer_temp(message, "Usage: /export csv")
+            await _answer_temp(message, "Использование: /export csv")
             return
         day = datetime.now(settings.timezone).date().isoformat()
         path = f"export_{day}.csv"
@@ -494,7 +494,7 @@ def build_router(settings: Settings, db: Database) -> Router:
             f"from_user.id={user_id}\n"
             f"sender_chat.id={sender_chat_id}\n"
             f"OWNER_IDS={sorted(settings.owner_ids)}\n\n"
-            "Если from_user.id не совпадает с OWNER_IDS, owner-команды будут игнорироваться.\n"
+            "Если from_user.id не совпадает с OWNER_IDS, команды администратора будут игнорироваться.\n"
             "Если вы админ с анонимным режимом, выключите Anonymous Admin и повторите."
         )
 
@@ -515,7 +515,7 @@ def build_router(settings: Settings, db: Database) -> Router:
     @router.callback_query(F.data.startswith("adm:"))
     async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         if callback.from_user.id not in settings.owner_ids:
-            await callback.answer("Только для owner", show_alert=True)
+            await callback.answer("Только для администратора", show_alert=True)
             return
 
         action = (callback.data or "").split(":", 1)[1]
@@ -538,13 +538,14 @@ def build_router(settings: Settings, db: Database) -> Router:
                 await scheduler_jobs._check_inactivity(bot, settings, db)
             elif action == "logs_tail":
                 tail = _read_log_tail(lines=50)
-                await callback.message.answer(f"📄 <b>Последние 50 строк лога</b>\n\n<pre>{tail}</pre>", parse_mode="HTML")
+                await callback.message.answer(f"📄 <b>Последние 50 строк лога</b>\n\n<pre>{tail}</pre>", parse_mode="HTML", reply_markup=_back_main_kb())
             elif action == "logs_file":
                 log_path = Path("logs") / "bot.log"
                 if not log_path.exists():
                     await callback.answer("Лог-файл пока не создан", show_alert=True)
                     return
                 await callback.message.answer_document(FSInputFile(str(log_path)))
+                await callback.message.answer("⬅️ Вернуться в админ-меню", reply_markup=_back_main_kb())
             elif action == "open_vars":
                 await callback.message.answer("⚙️ Меню переменных", reply_markup=_variables_kb(db, settings))
             elif action.startswith("var:"):
@@ -583,7 +584,7 @@ def build_router(settings: Settings, db: Database) -> Router:
             elif action == "show_cfg":
                 await callback.message.answer(_build_runtime_overview(db, settings), parse_mode="HTML")
             elif action == "help":
-                await callback.message.answer(ADMIN_HELP_TEXT, parse_mode="HTML")
+                await callback.message.answer(ADMIN_HELP_TEXT, parse_mode="HTML", reply_markup=_back_main_kb())
             elif action == "menu":
                 await callback.message.answer("🛠 Админ-меню", reply_markup=_admin_kb())
                 await callback.answer("♻️ Меню обновлено")
@@ -632,35 +633,63 @@ def build_router(settings: Settings, db: Database) -> Router:
         if not raw.lstrip("-").isdigit():
             await _answer_temp(message, "Введите корректный user_id (число)")
             return
-        await state.update_data(add_user_id=int(raw))
+        uid = int(raw)
+        auto_username = ""
+        auto_full_name = ""
+        try:
+            chat = await message.bot.get_chat(uid)
+            auto_username = (chat.username or "").strip()
+            auto_full_name = (chat.full_name or chat.first_name or "").strip()
+        except Exception:
+            pass
+
+        await state.update_data(add_user_id=uid, auto_username=auto_username, auto_full_name=auto_full_name)
         await state.set_state(AdminConfigState.wait_employee_full_name)
+        if auto_full_name:
+            await _answer_temp(
+                message,
+                f"🪪 Введите имя сотрудника (или '+' чтобы оставить <b>{auto_full_name}</b>)",
+                delete_request=False,
+            )
+            return
         await _answer_temp(message, "🪪 Введите имя сотрудника (как показывать в отчётах)", delete_request=False)
 
     @router.message(AdminConfigState.wait_employee_full_name)
     async def cfg_employee_full_name(message: Message, state: FSMContext) -> None:
         full_name = (message.text or "").strip()
+        data = await state.get_data()
+        auto_full_name = str(data.get("auto_full_name", "")).strip()
+        if full_name == "+" and auto_full_name:
+            full_name = auto_full_name
         if not full_name:
             await _answer_temp(message, "Имя не может быть пустым")
             return
         await state.update_data(add_full_name=full_name)
         await state.set_state(AdminConfigState.wait_employee_username)
+        auto_username = str(data.get("auto_username", "")).strip()
+        if auto_username:
+            await _answer_temp(message, f"📛 Введите username (или '+' чтобы оставить @{auto_username}, '-' если нет)", delete_request=False)
+            return
         await _answer_temp(message, "📛 Введите username в формате @username (или '-' если нет)", delete_request=False)
 
     @router.message(AdminConfigState.wait_employee_username)
     async def cfg_employee_username(message: Message, state: FSMContext) -> None:
         raw = (message.text or "").strip()
+        data = await state.get_data()
+        auto_username = str(data.get("auto_username", "")).strip()
         if raw == "-":
             username = ""
+        elif raw == "+" and auto_username:
+            username = auto_username
         else:
             username = raw.lstrip("@")
             if username and (" " in username or username.startswith("-")):
-                await _answer_temp(message, "Username должен быть в формате @username или '-'")
+                await _answer_temp(message, "Имя пользователя должно быть в формате @username, '+' или '-'")
                 return
 
-        data = await state.get_data()
         role = str(data.get("add_role", "general"))
         uid = int(data.get("add_user_id", 0))
-        full_name = str(data.get("add_full_name", "")).strip() or f"User {uid}"
+        full_name = str(data.get("add_full_name", "")).strip() or f"Сотрудник {uid}"
         db.upsert_employee(uid, username=username, full_name=full_name, role=role)
         settings.employees[uid] = Employee(uid, username, full_name, role)
         await state.clear()
@@ -760,7 +789,7 @@ async def _finish_shipment(message: Message, state: FSMContext, settings: Settin
     uid = int(message.from_user.id) if message.from_user else 0
     db.save_shipment(user_id=uid, day=now.date().isoformat(), client_number=str(data.get("client_number", "")), status=str(data.get("status", "created")), delay_reason=delay_reason, created_at=now.isoformat(timespec="seconds"))
     logger.info("📦 shipment saved user_id=%s status=%s", uid, data.get("status"))
-    await message.answer(f"📦 shipment logged: {data.get('client_number')} status={data.get('status')}")
+    await message.answer(f"📦 Отправка сохранена: {data.get('client_number')}, статус={data.get('status')}")
     await state.clear()
 
 
@@ -791,19 +820,19 @@ async def _answer_temp(message: Message, text: str, delete_request: bool = True,
 def _admin_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🚀 Check-in prompt", callback_data="adm:checkin_prompt")],
+            [InlineKeyboardButton(text="🚀 Отправить чек-ин", callback_data="adm:checkin_prompt")],
             [InlineKeyboardButton(text="📋 Кто НЕ чек-ин", callback_data="adm:checkin_missing")],
-            [InlineKeyboardButton(text="🌆 EOD prompt", callback_data="adm:eod_prompt")],
+            [InlineKeyboardButton(text="🌆 Отправить напоминание EOD", callback_data="adm:eod_prompt")],
             [InlineKeyboardButton(text="📭 Кто НЕ сдал EOD", callback_data="adm:eod_missing")],
-            [InlineKeyboardButton(text="📊 Daily report", callback_data="adm:daily")],
-            [InlineKeyboardButton(text="🗓 Weekly + KPI", callback_data="adm:weekly")],
+            [InlineKeyboardButton(text="📊 Отправить дневной отчёт", callback_data="adm:daily")],
+            [InlineKeyboardButton(text="🗓 Отправить недельный отчёт + KPI", callback_data="adm:weekly")],
             [InlineKeyboardButton(text="⚠️ Проверка неактивности", callback_data="adm:inactivity")],
             [InlineKeyboardButton(text="⚙️ Меню переменных", callback_data="adm:open_vars")],
             [InlineKeyboardButton(text="👥 Меню сотрудников", callback_data="adm:open_employees")],
             [InlineKeyboardButton(text="📘 Инструкции и команды", callback_data="adm:help")],
             [InlineKeyboardButton(text="📄 Последние 50 строк лога", callback_data="adm:logs_tail")],
             [InlineKeyboardButton(text="⬇️ Скачать лог", callback_data="adm:logs_file")],
-            [InlineKeyboardButton(text="♻️ Обновить меню", callback_data="adm:menu")],
+            [InlineKeyboardButton(text="♻️ Обновить", callback_data="adm:menu")],
         ]
     )
 
@@ -828,14 +857,19 @@ def _variable_details_kb(key: str) -> InlineKeyboardMarkup:
     )
 
 
+
+
+def _back_main_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back_main")]])
+
 def _employees_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📋 Список сотрудников", callback_data="adm:employees_list")],
-            [InlineKeyboardButton(text="➕ Добавить сотрудника (sales)", callback_data="adm:emp_add_role:sales")],
-            [InlineKeyboardButton(text="➕ Добавить сотрудника (logistics)", callback_data="adm:emp_add_role:logistics")],
-            [InlineKeyboardButton(text="➕ Добавить сотрудника (finance)", callback_data="adm:emp_add_role:finance")],
-            [InlineKeyboardButton(text="➕ Добавить сотрудника (general)", callback_data="adm:emp_add_role:general")],
+            [InlineKeyboardButton(text="➕ Добавить сотрудника (продажи)", callback_data="adm:emp_add_role:sales")],
+            [InlineKeyboardButton(text="➕ Добавить сотрудника (логистика)", callback_data="adm:emp_add_role:logistics")],
+            [InlineKeyboardButton(text="➕ Добавить сотрудника (финансы)", callback_data="adm:emp_add_role:finance")],
+            [InlineKeyboardButton(text="➕ Добавить сотрудника (общая роль)", callback_data="adm:emp_add_role:general")],
             [InlineKeyboardButton(text="ℹ️ Как добавить: сотрудник пишет /myid", callback_data="adm:help")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back_main")],
         ]
@@ -903,7 +937,7 @@ def _build_variable_details_text(key: str, db: Database, settings: Settings) -> 
 def _build_employees_text(settings: Settings) -> str:
     lines = ["<b>👥 Сотрудники</b>"]
     for uid, emp in sorted(settings.employees.items(), key=lambda i: (i[1].role, i[1].full_name.lower(), i[0])):
-        uname = f"@{emp.username}" if emp.username else "без username"
+        uname = f"@{emp.username}" if emp.username else "без @username"
         lines.append(f"• <b>{emp.full_name}</b> ({emp.role}) — {uname}, id=<code>{uid}</code>")
     if len(lines) == 1:
         lines.append("⚪ Список пуст")
@@ -959,7 +993,7 @@ async def _ensure_owner(message: Message, settings: Settings) -> bool:
     sender_chat_id = message.sender_chat.id if message.sender_chat else None
     await _answer_temp(
         message,
-        "⛔ Команда только для owner.\n"
+        "⛔ Команда только для администратора.\n"
         f"Ваш from_user.id={user_id}, sender_chat.id={sender_chat_id}.\n"
         f"OWNER_IDS={sorted(settings.owner_ids)}\n"
         "💡 Если вы анонимный админ в группе, отключите Anonymous Admin.",
