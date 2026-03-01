@@ -30,6 +30,8 @@ class AdminConfigState(StatesGroup):
     wait_work_end = State()
     wait_inactivity_minutes = State()
     wait_employee_id = State()
+    wait_employee_full_name = State()
+    wait_employee_username = State()
     wait_admin_chat_id = State()
     wait_general_chat_id = State()
     wait_sales_chat_id = State()
@@ -73,6 +75,76 @@ class RuntimeConfig:
     checkin_time: str
     eod_time: str
     inactivity_minutes: int
+
+
+VARIABLE_META = {
+    "admin_chat_id": {
+        "title": "👑 ADMIN_CHAT_ID",
+        "description": "Чат для админ-алертов и системных отчётов.",
+        "prompt": "Введите ADMIN_CHAT_ID (например -1001234567890). Подсказка: /chatinfo",
+        "state": AdminConfigState.wait_admin_chat_id,
+    },
+    "general_chat_id": {
+        "title": "💬 GENERAL_CHAT_ID",
+        "description": "Общий чат для check-in/EOD напоминаний.",
+        "prompt": "Введите GENERAL_CHAT_ID (например -1001234567890). Подсказка: /chatinfo",
+        "state": AdminConfigState.wait_general_chat_id,
+    },
+    "sales_chat_id": {
+        "title": "💰 SALES_CHAT_ID",
+        "description": "Чат отдела продаж для команды /sale.",
+        "prompt": "Введите SALES_CHAT_ID. Подсказка: /chatinfo",
+        "state": AdminConfigState.wait_sales_chat_id,
+    },
+    "logistics_chat_id": {
+        "title": "📦 LOGISTICS_CHAT_ID",
+        "description": "Чат логистики для команды /shipment.",
+        "prompt": "Введите LOGISTICS_CHAT_ID. Подсказка: /chatinfo",
+        "state": AdminConfigState.wait_logistics_chat_id,
+    },
+    "work_chat_ids": {
+        "title": "🧩 WORK_CHAT_IDS",
+        "description": "Список рабочих чатов, где учитывается активность и проверяется тишина.",
+        "prompt": "Введите WORK_CHAT_IDS через запятую. Пример: -1001111111111,-1002222222222",
+        "state": AdminConfigState.wait_work_chat_ids,
+    },
+    "report_time": {
+        "title": "📊 REPORT_TIME",
+        "description": "Время отправки дневного отчёта в админ-чат.",
+        "prompt": "Введите REPORT_TIME (HH:MM)",
+        "state": AdminConfigState.wait_report_time,
+    },
+    "checkin_time": {
+        "title": "🌅 CHECKIN_TIME",
+        "description": "Время публикации check-in кнопки в общий чат.",
+        "prompt": "Введите CHECKIN_TIME (HH:MM)",
+        "state": AdminConfigState.wait_checkin_time,
+    },
+    "eod_time": {
+        "title": "🌆 EOD_TIME",
+        "description": "Время публикации напоминания о вечернем отчёте.",
+        "prompt": "Введите EOD_TIME (HH:MM)",
+        "state": AdminConfigState.wait_eod_time,
+    },
+    "work_start": {
+        "title": "🟢 WORK_START",
+        "description": "Начало рабочего окна для проверки неактивности.",
+        "prompt": "Введите WORK_START (HH:MM)",
+        "state": AdminConfigState.wait_work_start,
+    },
+    "work_end": {
+        "title": "🔴 WORK_END",
+        "description": "Конец рабочего окна для проверки неактивности.",
+        "prompt": "Введите WORK_END (HH:MM)",
+        "state": AdminConfigState.wait_work_end,
+    },
+    "inactivity_minutes": {
+        "title": "⏱ INACTIVITY_MINUTES",
+        "description": "Через сколько минут тишины бот отправляет алерт о неактивности.",
+        "prompt": "Введите INACTIVITY_MINUTES (например 60)",
+        "state": AdminConfigState.wait_inactivity_minutes,
+    },
+}
 
 
 def get_runtime_config(settings: Settings, db: Database) -> RuntimeConfig:
@@ -431,14 +503,14 @@ def build_router(settings: Settings, db: Database) -> Router:
         if not await _ensure_owner(message, settings):
             return
         await _safe_delete_message(message)
-        await message.answer(ADMIN_HELP_TEXT, parse_mode="HTML", reply_markup=_admin_kb())
+        await message.answer("🛠 Админ-меню", reply_markup=_admin_kb())
 
     @router.message(Command("admin_test"))
     async def cmd_admin_alias(message: Message) -> None:
         if not await _ensure_owner(message, settings):
             return
         await _safe_delete_message(message)
-        await message.answer(ADMIN_HELP_TEXT, parse_mode="HTML", reply_markup=_admin_kb())
+        await message.answer("🛠 Админ-меню", reply_markup=_admin_kb())
 
     @router.callback_query(F.data.startswith("adm:"))
     async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
@@ -474,9 +546,29 @@ def build_router(settings: Settings, db: Database) -> Router:
                     return
                 await callback.message.answer_document(FSInputFile(str(log_path)))
             elif action == "open_vars":
-                await callback.message.answer("⚙️ Меню переменных", reply_markup=_variables_kb())
+                await callback.message.answer("⚙️ Меню переменных", reply_markup=_variables_kb(db, settings))
+            elif action.startswith("var:"):
+                key = action.split(":", 1)[1]
+                if key not in VARIABLE_META:
+                    await callback.answer("Неизвестная переменная", show_alert=True)
+                    return
+                await callback.message.answer(
+                    _build_variable_details_text(key, db, settings),
+                    parse_mode="HTML",
+                    reply_markup=_variable_details_kb(key),
+                )
+            elif action.startswith("setvar:"):
+                key = action.split(":", 1)[1]
+                meta = VARIABLE_META.get(key)
+                if not meta:
+                    await callback.answer("Неизвестная переменная", show_alert=True)
+                    return
+                await state.set_state(meta["state"])
+                await callback.message.answer(meta["prompt"])
             elif action == "open_employees":
                 await callback.message.answer("👥 Меню сотрудников", reply_markup=_employees_kb())
+            elif action == "employees_list":
+                await callback.message.answer(_build_employees_text(settings), parse_mode="HTML", reply_markup=_employees_kb())
             elif action == "back_main":
                 await callback.message.answer("🛠 Главное админ-меню", reply_markup=_admin_kb())
             elif action.startswith("emp_add_role:"):
@@ -484,49 +576,16 @@ def build_router(settings: Settings, db: Database) -> Router:
                 await state.set_state(AdminConfigState.wait_employee_id)
                 await state.update_data(add_role=role)
                 await callback.message.answer(
-                    f"Введите user_id сотрудника для роли {role}.\n"
-                    "Пользователь может узнать ID командой /myid"
-                )
-            elif action == "ask_admin_chat":
-                await state.set_state(AdminConfigState.wait_admin_chat_id)
-                await callback.message.answer("Введите ADMIN_CHAT_ID (например -1001234567890). Подсказка: /chatinfo")
-            elif action == "ask_general_chat":
-                await state.set_state(AdminConfigState.wait_general_chat_id)
-                await callback.message.answer("Введите GENERAL_CHAT_ID (например -1001234567890). Подсказка: /chatinfo")
-            elif action == "ask_sales_chat":
-                await state.set_state(AdminConfigState.wait_sales_chat_id)
-                await callback.message.answer("Введите SALES_CHAT_ID. Подсказка: /chatinfo")
-            elif action == "ask_logistics_chat":
-                await state.set_state(AdminConfigState.wait_logistics_chat_id)
-                await callback.message.answer("Введите LOGISTICS_CHAT_ID. Подсказка: /chatinfo")
-            elif action == "ask_work_chats":
-                await state.set_state(AdminConfigState.wait_work_chat_ids)
-                await callback.message.answer(
-                    "Введите WORK_CHAT_IDS через запятую.\n"
-                    "Пример: -1001111111111,-1002222222222"
+                    f"🆔 Введите user_id сотрудника для роли <b>{role}</b>.\n"
+                    "Пользователь может узнать ID командой /myid",
+                    parse_mode="HTML",
                 )
             elif action == "show_cfg":
-                await callback.message.answer(_build_runtime_overview(db, settings))
-            elif action == "ask_report":
-                await state.set_state(AdminConfigState.wait_report_time)
-                await callback.message.answer("Введите REPORT_TIME (HH:MM)")
-            elif action == "ask_checkin":
-                await state.set_state(AdminConfigState.wait_checkin_time)
-                await callback.message.answer("Введите CHECKIN_TIME (HH:MM)")
-            elif action == "ask_eod":
-                await state.set_state(AdminConfigState.wait_eod_time)
-                await callback.message.answer("Введите EOD_TIME (HH:MM)")
-            elif action == "ask_work_start":
-                await state.set_state(AdminConfigState.wait_work_start)
-                await callback.message.answer("Введите WORK_START (HH:MM)")
-            elif action == "ask_work_end":
-                await state.set_state(AdminConfigState.wait_work_end)
-                await callback.message.answer("Введите WORK_END (HH:MM)")
-            elif action == "ask_inactivity":
-                await state.set_state(AdminConfigState.wait_inactivity_minutes)
-                await callback.message.answer("Введите INACTIVITY_MINUTES (например 60)")
+                await callback.message.answer(_build_runtime_overview(db, settings), parse_mode="HTML")
+            elif action == "help":
+                await callback.message.answer(ADMIN_HELP_TEXT, parse_mode="HTML")
             elif action == "menu":
-                await callback.message.answer(ADMIN_HELP_TEXT, parse_mode="HTML", reply_markup=_admin_kb())
+                await callback.message.answer("🛠 Админ-меню", reply_markup=_admin_kb())
                 await callback.answer("♻️ Меню обновлено")
                 return
             else:
@@ -573,14 +632,43 @@ def build_router(settings: Settings, db: Database) -> Router:
         if not raw.lstrip("-").isdigit():
             await _answer_temp(message, "Введите корректный user_id (число)")
             return
+        await state.update_data(add_user_id=int(raw))
+        await state.set_state(AdminConfigState.wait_employee_full_name)
+        await _answer_temp(message, "🪪 Введите имя сотрудника (как показывать в отчётах)", delete_request=False)
+
+    @router.message(AdminConfigState.wait_employee_full_name)
+    async def cfg_employee_full_name(message: Message, state: FSMContext) -> None:
+        full_name = (message.text or "").strip()
+        if not full_name:
+            await _answer_temp(message, "Имя не может быть пустым")
+            return
+        await state.update_data(add_full_name=full_name)
+        await state.set_state(AdminConfigState.wait_employee_username)
+        await _answer_temp(message, "📛 Введите username в формате @username (или '-' если нет)", delete_request=False)
+
+    @router.message(AdminConfigState.wait_employee_username)
+    async def cfg_employee_username(message: Message, state: FSMContext) -> None:
+        raw = (message.text or "").strip()
+        if raw == "-":
+            username = ""
+        else:
+            username = raw.lstrip("@")
+            if username and (" " in username or username.startswith("-")):
+                await _answer_temp(message, "Username должен быть в формате @username или '-'")
+                return
+
         data = await state.get_data()
         role = str(data.get("add_role", "general"))
-        uid = int(raw)
-        db.upsert_employee(uid, username=f"user_{uid}", full_name=f"User {uid}", role=role)
-        settings.employees[uid] = Employee(uid, f"user_{uid}", f"User {uid}", role)
+        uid = int(data.get("add_user_id", 0))
+        full_name = str(data.get("add_full_name", "")).strip() or f"User {uid}"
+        db.upsert_employee(uid, username=username, full_name=full_name, role=role)
+        settings.employees[uid] = Employee(uid, username, full_name, role)
         await state.clear()
-        logger.info("👤 employee added from menu user_id=%s role=%s", uid, role)
-        await _answer_temp(message, f"✅ Сотрудник добавлен: {uid} ({role})")
+        logger.info("👤 employee added from menu user_id=%s role=%s username=%s", uid, role, username)
+        username_part = f" (@{username})" if username else ""
+        await _answer_temp(message, f"✅ Сотрудник добавлен: {full_name}{username_part}, роль={role}", delete_request=False)
+        await message.answer("👥 Обновлённый список сотрудников", parse_mode="HTML", reply_markup=_employees_kb())
+        await message.answer(_build_employees_text(settings), parse_mode="HTML")
 
     @router.message(AdminConfigState.wait_inactivity_minutes)
     async def cfg_inactivity(message: Message, state: FSMContext) -> None:
@@ -703,7 +791,6 @@ async def _answer_temp(message: Message, text: str, delete_request: bool = True,
 def _admin_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📚 Инструкции и команды", callback_data="adm:menu")],
             [InlineKeyboardButton(text="🚀 Check-in prompt", callback_data="adm:checkin_prompt")],
             [InlineKeyboardButton(text="📋 Кто НЕ чек-ин", callback_data="adm:checkin_missing")],
             [InlineKeyboardButton(text="🌆 EOD prompt", callback_data="adm:eod_prompt")],
@@ -713,6 +800,7 @@ def _admin_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="⚠️ Проверка неактивности", callback_data="adm:inactivity")],
             [InlineKeyboardButton(text="⚙️ Меню переменных", callback_data="adm:open_vars")],
             [InlineKeyboardButton(text="👥 Меню сотрудников", callback_data="adm:open_employees")],
+            [InlineKeyboardButton(text="📘 Инструкции и команды", callback_data="adm:help")],
             [InlineKeyboardButton(text="📄 Последние 50 строк лога", callback_data="adm:logs_tail")],
             [InlineKeyboardButton(text="⬇️ Скачать лог", callback_data="adm:logs_file")],
             [InlineKeyboardButton(text="♻️ Обновить меню", callback_data="adm:menu")],
@@ -720,22 +808,22 @@ def _admin_kb() -> InlineKeyboardMarkup:
     )
 
 
-def _variables_kb() -> InlineKeyboardMarkup:
+def _variables_kb(db: Database, settings: Settings) -> InlineKeyboardMarkup:
+    rows = []
+    for key, meta in VARIABLE_META.items():
+        icon = "⭐" if _is_variable_set(key, db, settings) else "⚪"
+        rows.append([InlineKeyboardButton(text=f"{icon} {meta['title']}", callback_data=f"adm:var:{key}")])
+    rows.append([InlineKeyboardButton(text="📌 Показать сводную конфигурацию", callback_data="adm:show_cfg")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back_main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _variable_details_kb(key: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🧾 Ввести ADMIN_CHAT_ID", callback_data="adm:ask_admin_chat")],
-            [InlineKeyboardButton(text="🧾 Ввести GENERAL_CHAT_ID", callback_data="adm:ask_general_chat")],
-            [InlineKeyboardButton(text="🧾 Ввести SALES_CHAT_ID", callback_data="adm:ask_sales_chat")],
-            [InlineKeyboardButton(text="🧾 Ввести LOGISTICS_CHAT_ID", callback_data="adm:ask_logistics_chat")],
-            [InlineKeyboardButton(text="🧾 Ввести WORK_CHAT_IDS", callback_data="adm:ask_work_chats")],
-            [InlineKeyboardButton(text="🕒 Настроить REPORT_TIME", callback_data="adm:ask_report")],
-            [InlineKeyboardButton(text="🌅 Настроить CHECKIN_TIME", callback_data="adm:ask_checkin")],
-            [InlineKeyboardButton(text="🌆 Настроить EOD_TIME", callback_data="adm:ask_eod")],
-            [InlineKeyboardButton(text="🟢 Настроить WORK_START", callback_data="adm:ask_work_start")],
-            [InlineKeyboardButton(text="🔴 Настроить WORK_END", callback_data="adm:ask_work_end")],
-            [InlineKeyboardButton(text="⏱ Настроить INACTIVITY_MINUTES", callback_data="adm:ask_inactivity")],
-            [InlineKeyboardButton(text="📌 Показать текущую конфигурацию", callback_data="adm:show_cfg")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back_main")],
+            [InlineKeyboardButton(text="✏️ Установить значение", callback_data=f"adm:setvar:{key}")],
+            [InlineKeyboardButton(text="⬅️ Назад к переменным", callback_data="adm:open_vars")],
+            [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="adm:back_main")],
         ]
     )
 
@@ -743,11 +831,12 @@ def _variables_kb() -> InlineKeyboardMarkup:
 def _employees_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список сотрудников", callback_data="adm:employees_list")],
             [InlineKeyboardButton(text="➕ Добавить сотрудника (sales)", callback_data="adm:emp_add_role:sales")],
             [InlineKeyboardButton(text="➕ Добавить сотрудника (logistics)", callback_data="adm:emp_add_role:logistics")],
             [InlineKeyboardButton(text="➕ Добавить сотрудника (finance)", callback_data="adm:emp_add_role:finance")],
             [InlineKeyboardButton(text="➕ Добавить сотрудника (general)", callback_data="adm:emp_add_role:general")],
-            [InlineKeyboardButton(text="ℹ️ Подсказка: сотрудник пишет /myid", callback_data="adm:menu")],
+            [InlineKeyboardButton(text="ℹ️ Как добавить: сотрудник пишет /myid", callback_data="adm:help")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back_main")],
         ]
     )
@@ -768,32 +857,67 @@ def _set_work_chat(db: Database, settings: Settings, chat_id: int, add: bool) ->
     db.set_setting("work_chat_ids", ",".join(str(x) for x in sorted(current)))
 
 
-def _build_runtime_overview(db: Database, settings: Settings) -> str:
-    admin_chat = scheduler_jobs.get_runtime_chat_id(db, settings, "admin_chat_id")
-    general_chat = scheduler_jobs.get_runtime_chat_id(db, settings, "general_chat_id")
-    sales_chat = scheduler_jobs.get_runtime_chat_id(db, settings, "sales_chat_id")
-    logistics_chat = scheduler_jobs.get_runtime_chat_id(db, settings, "logistics_chat_id")
-    work_chats = sorted(scheduler_jobs.get_runtime_work_chat_ids(db, settings))
-    report = db.get_setting("report_time") or settings.report_time.strftime("%H:%M")
-    checkin = db.get_setting("checkin_time") or settings.checkin_time.strftime("%H:%M")
-    eod = db.get_setting("eod_time") or settings.eod_time.strftime("%H:%M")
-    wstart = db.get_setting("work_start") or settings.work_start.strftime("%H:%M")
-    wend = db.get_setting("work_end") or settings.work_end.strftime("%H:%M")
-    inactivity = db.get_setting("inactivity_minutes") or str(settings.inactivity_minutes)
+def _runtime_value(key: str, db: Database, settings: Settings) -> str:
+    if key == "work_chat_ids":
+        val = sorted(scheduler_jobs.get_runtime_work_chat_ids(db, settings))
+        return ",".join(str(x) for x in val)
+    if key in {"admin_chat_id", "general_chat_id", "sales_chat_id", "logistics_chat_id"}:
+        return str(scheduler_jobs.get_runtime_chat_id(db, settings, key))
+    if key in {"report_time", "checkin_time", "eod_time", "work_start", "work_end", "inactivity_minutes"}:
+        defaults = {
+            "report_time": settings.report_time.strftime("%H:%M"),
+            "checkin_time": settings.checkin_time.strftime("%H:%M"),
+            "eod_time": settings.eod_time.strftime("%H:%M"),
+            "work_start": settings.work_start.strftime("%H:%M"),
+            "work_end": settings.work_end.strftime("%H:%M"),
+            "inactivity_minutes": str(settings.inactivity_minutes),
+        }
+        return db.get_setting(key) or defaults[key]
+    return db.get_setting(key) or ""
+
+
+def _is_variable_set(key: str, db: Database, settings: Settings) -> bool:
+    if key == "work_chat_ids":
+        return bool(scheduler_jobs.get_runtime_work_chat_ids(db, settings))
+    if key in {"admin_chat_id", "general_chat_id", "sales_chat_id", "logistics_chat_id"}:
+        return scheduler_jobs.get_runtime_chat_id(db, settings, key) != 0
+    return db.get_setting(key) is not None
+
+
+def _build_variable_details_text(key: str, db: Database, settings: Settings) -> str:
+    meta = VARIABLE_META[key]
+    current = _runtime_value(key, db, settings)
+    is_set = _is_variable_set(key, db, settings)
+    state_icon = "⭐ Установлено" if is_set else "⚪ Не задано"
+    source = "runtime (из БД)" if db.get_setting(key) is not None else "значение по умолчанию"
+    pretty = current if current else "(пусто)"
     return (
-        "📌 <b>Текущая runtime-конфигурация</b>\n"
-        f"• ADMIN_CHAT_ID: <code>{admin_chat}</code>\n"
-        f"• GENERAL_CHAT_ID: <code>{general_chat}</code>\n"
-        f"• SALES_CHAT_ID: <code>{sales_chat}</code>\n"
-        f"• LOGISTICS_CHAT_ID: <code>{logistics_chat}</code>\n"
-        f"• WORK_CHAT_IDS: <code>{','.join(str(x) for x in work_chats)}</code>\n"
-        f"• REPORT_TIME: <code>{report}</code>\n"
-        f"• CHECKIN_TIME: <code>{checkin}</code>\n"
-        f"• EOD_TIME: <code>{eod}</code>\n"
-        f"• WORK_START: <code>{wstart}</code>\n"
-        f"• WORK_END: <code>{wend}</code>\n"
-        f"• INACTIVITY_MINUTES: <code>{inactivity}</code>"
+        f"<b>{meta['title']}</b>\n"
+        f"{state_icon}\n\n"
+        f"📝 {meta['description']}\n"
+        f"📌 Текущее значение: <code>{pretty}</code>\n"
+        f"🧭 Источник: {source}"
     )
+
+
+def _build_employees_text(settings: Settings) -> str:
+    lines = ["<b>👥 Сотрудники</b>"]
+    for uid, emp in sorted(settings.employees.items(), key=lambda i: (i[1].role, i[1].full_name.lower(), i[0])):
+        uname = f"@{emp.username}" if emp.username else "без username"
+        lines.append(f"• <b>{emp.full_name}</b> ({emp.role}) — {uname}, id=<code>{uid}</code>")
+    if len(lines) == 1:
+        lines.append("⚪ Список пуст")
+    return "\n".join(lines)
+
+
+def _build_runtime_overview(db: Database, settings: Settings) -> str:
+    lines = ["📌 <b>Текущая runtime-конфигурация</b>"]
+    for key in VARIABLE_META:
+        value = _runtime_value(key, db, settings)
+        icon = "⭐" if _is_variable_set(key, db, settings) else "⚪"
+        pretty = value if value else "(пусто)"
+        lines.append(f"{icon} {key.upper()}: <code>{pretty}</code>")
+    return "\n".join(lines)
 
 
 def _read_log_tail(lines: int = 50) -> str:
