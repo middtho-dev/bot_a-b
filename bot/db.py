@@ -84,6 +84,13 @@ class Database:
                     value TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS employees (
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    full_name TEXT NOT NULL,
+                    role TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS inactivity_alerts (
                     user_id INTEGER NOT NULL,
                     day TEXT NOT NULL,
@@ -301,6 +308,28 @@ class Database:
             writer.writerow(["user_id", "chat_id", "day", "message_count", "first_activity_at", "last_activity_at"])
             for row in rows:
                 writer.writerow([row["user_id"], row["chat_id"], row["day"], row["message_count"], row["first_activity_at"], row["last_activity_at"]])
+
+
+
+    def upsert_employee(self, user_id: int, username: str, full_name: str, role: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO employees (user_id, username, full_name, role)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    username = excluded.username,
+                    full_name = excluded.full_name,
+                    role = excluded.role
+                """,
+                (user_id, username, full_name, role),
+            )
+
+    def get_all_employees(self) -> list[sqlite3.Row]:
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT user_id, username, full_name, role FROM employees ORDER BY user_id"
+            ).fetchall()
 
     def get_sales_between(self, start_day: str, end_day: str) -> list[sqlite3.Row]:
         with self._connect() as conn:

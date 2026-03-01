@@ -81,8 +81,12 @@ def _get_hhmm(raw: str) -> tuple[int, int]:
 async def _send_checkin_prompt(bot: Bot, settings: Settings, db: Database) -> None:
     if not settings.general_chat_id:
         return
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ На связи", callback_data="checkin")]])
-    await bot.send_message(settings.general_chat_id, "Подтвердите начало рабочего дня", reply_markup=kb)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ На связи", callback_data=f"checkin:{datetime.now(settings.timezone).date().isoformat()}")]])
+    await bot.send_message(
+        settings.general_chat_id,
+        "Подтвердите начало рабочего дня\nКнопка актуальна только сегодня. Также можно командой /checkin",
+        reply_markup=kb,
+    )
 
 
 async def _send_checkin_missing(bot: Bot, settings: Settings, db: Database) -> None:

@@ -61,16 +61,41 @@ def build_router(settings: Settings, db: Database) -> Router:
             return
         db.record_message(user.id, message.chat.id, datetime.now(settings.timezone))
 
-    @router.callback_query(F.data == "checkin")
+    @router.callback_query(F.data.startswith("checkin:"))
     async def on_checkin(callback: CallbackQuery) -> None:
         user = callback.from_user
         if user.id not in settings.employees:
             await callback.answer("Вы не в списке сотрудников", show_alert=True)
             return
+
         now = datetime.now(settings.timezone)
-        db.save_checkin(user.id, now.date().isoformat(), now.isoformat(timespec="seconds"))
-        await callback.answer("Отметка принята ✅")
-        await callback.message.answer(f"✅ @{user.username or user.id} отметил(а) начало дня")
+        token_day = (callback.data or "").split(":", 1)[1]
+        today = now.date().isoformat()
+        if token_day != today:
+            await callback.answer("Эта кнопка уже неактуальна, дождитесь нового чек-ина", show_alert=True)
+            return
+
+        checked = db.checked_in_user_ids(today)
+        if user.id in checked:
+            await callback.answer("Вы уже отметились сегодня ✅", show_alert=False)
+            return
+
+        db.save_checkin(user.id, today, now.isoformat(timespec="seconds"))
+        await callback.answer("Отметка принята ✅", show_alert=False)
+
+    @router.message(Command("checkin"))
+    async def cmd_checkin(message: Message) -> None:
+        user = message.from_user
+        if not user or user.id not in settings.employees:
+            return
+        now = datetime.now(settings.timezone)
+        today = now.date().isoformat()
+        checked = db.checked_in_user_ids(today)
+        if user.id in checked:
+            await message.answer("Вы уже отметились сегодня ✅")
+            return
+        db.save_checkin(user.id, today, now.isoformat(timespec="seconds"))
+        await message.answer("✅ Чек-ин принят")
 
     @router.message(Command("eod"))
     async def cmd_eod(message: Message, state: FSMContext) -> None:
@@ -244,7 +269,22 @@ def build_router(settings: Settings, db: Database) -> Router:
     async def cmd_add_employee(message: Message, command: CommandObject) -> None:
         if not _is_owner(message, settings):
             return
-        await message.answer("Для текущей версии добавление сотрудников делается через EMPLOYEES_JSON + рестарт")
+
+        role = _parse_role_from_args(command.args or "")
+        if role is None:
+            await message.answer("Usage: reply to a user with /add_employee role=sales|logistics|finance|general")
+            return
+
+        source = message.reply_to_message.from_user if message.reply_to_message else None
+        if not source:
+            await message.answer("Нужно ответить на сообщение сотрудника командой /add_employee role=...")
+            return
+
+        username = source.username or ""
+        full_name = (source.full_name or "").strip() or username or str(source.id)
+        db.upsert_employee(source.id, username, full_name, role)
+        settings.employees[source.id] = Employee(source.id, username, full_name, role)
+        await message.answer(f"✅ Сотрудник добавлен: {full_name} ({role})")
 
     @router.message(Command("set_checkin_time"))
     async def cmd_set_checkin(message: Message, command: CommandObject) -> None:
@@ -305,6 +345,16 @@ async def _finish_shipment(
     )
     await message.answer(f"📦 shipment logged: {data.get('client_number')} status={data.get('status')}")
     await state.clear()
+
+
+def _parse_role_from_args(raw: str) -> str | None:
+    args = (raw or "").strip().lower()
+    for token in args.split():
+        if token.startswith("role="):
+            role = token.split("=", 1)[1]
+            if role in {"sales", "logistics", "finance", "general"}:
+                return role
+    return None
 
 
 def _is_owner(message: Message, settings: Settings) -> bool:
