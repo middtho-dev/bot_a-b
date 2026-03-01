@@ -37,6 +37,7 @@ class AdminConfigState(StatesGroup):
     wait_sales_chat_id = State()
     wait_logistics_chat_id = State()
     wait_work_chat_ids = State()
+    wait_schedule_anchor = State()
 
 
 ADMIN_HELP_TEXT = """🛠 <b>Админ-панель EasyWay</b>
@@ -54,7 +55,8 @@ ADMIN_HELP_TEXT = """🛠 <b>Админ-панель EasyWay</b>
 • /myid — показать ваш user_id (для добавления в систему)
 • /chatinfo — показать ID текущего чата
 • /add_employee role=sales|logistics|finance|general — reply на сотрудника
-• /export csv — выгрузка активности
+• /export_csv — выгрузка активности
+• /export csv — старый формат (оставлен для совместимости)
 
 <b>⚙️ Настройки через меню:</b>
 • ID чатов (admin/general/sales/logistics)
@@ -146,6 +148,8 @@ VARIABLE_META = {
     },
 }
 
+
+WEEKDAY_LABELS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
 def get_runtime_config(settings: Settings, db: Database) -> RuntimeConfig:
     return RuntimeConfig(
@@ -301,6 +305,7 @@ def build_router(settings: Settings, db: Database) -> Router:
             await _answer_temp(message, "Команда доступна только в чате продаж")
             return
         if not _is_employee_role(message.from_user.id if message.from_user else 0, settings.employees, "sales"):
+            await _answer_temp(message, "Команда /sale доступна только сотрудникам с ролью sales")
             return
         await _safe_delete_message(message)
         await state.set_state(SaleStates.client)
@@ -362,6 +367,7 @@ def build_router(settings: Settings, db: Database) -> Router:
             await _answer_temp(message, "Команда доступна только в чате логистики")
             return
         if not _is_employee_role(message.from_user.id if message.from_user else 0, settings.employees, "logistics"):
+            await _answer_temp(message, "Команда /shipment доступна только сотрудникам с ролью logistics")
             return
         await _safe_delete_message(message)
         await state.set_state(ShipmentStates.client_number)
@@ -485,6 +491,17 @@ def build_router(settings: Settings, db: Database) -> Router:
         await message.answer_document(FSInputFile(path))
 
 
+
+    @router.message(Command("export_csv"))
+    async def cmd_export_csv(message: Message) -> None:
+        if not await _ensure_owner(message, settings):
+            return
+        day = datetime.now(settings.timezone).date().isoformat()
+        path = f"export_{day}.csv"
+        db.export_csv(path, day)
+        await _safe_delete_message(message)
+        await message.answer_document(FSInputFile(path))
+
     @router.message(Command("whoami"))
     async def cmd_whoami(message: Message) -> None:
         user_id = message.from_user.id if message.from_user else None
@@ -570,6 +587,49 @@ def build_router(settings: Settings, db: Database) -> Router:
                 await callback.message.answer("👥 Меню сотрудников", reply_markup=_employees_kb())
             elif action == "employees_list":
                 await callback.message.answer(_build_employees_text(settings), parse_mode="HTML", reply_markup=_employees_kb())
+            elif action == "employees_remove_menu":
+                await callback.message.answer("🗑 Выберите сотрудника для удаления", parse_mode="HTML", reply_markup=_employees_remove_kb(settings))
+            elif action.startswith("emp_remove:"):
+                uid = int(action.split(":", 1)[1])
+                if uid in settings.owner_ids:
+                    await callback.message.answer("⛔ Нельзя удалить owner из системы", reply_markup=_employees_kb())
+                else:
+                    db.delete_employee(uid)
+                    settings.employees.pop(uid, None)
+                    await callback.message.answer(f"🗑 Сотрудник удалён: <code>{uid}</code>", parse_mode="HTML", reply_markup=_employees_kb())
+            elif action == "employees_schedule_menu":
+                await callback.message.answer("📅 Выберите сотрудника для настройки графика", reply_markup=_employees_schedule_kb(settings))
+            elif action.startswith("emp_schedule:"):
+                uid = int(action.split(":", 1)[1])
+                await callback.message.answer(_build_employee_schedule_text(uid, settings, db), parse_mode="HTML", reply_markup=_employee_schedule_kb(uid, db))
+            elif action.startswith("sched_toggle:"):
+                _, uid_raw, wd_raw = action.split(":")
+                uid = int(uid_raw)
+                wd = int(wd_raw)
+                sched = db.get_employee_schedule(uid)
+                enabled = {int(x) for x in sched.get("weekdays", "").split(",") if x.isdigit()}
+                if wd in enabled:
+                    enabled.remove(wd)
+                else:
+                    enabled.add(wd)
+                weekdays = ",".join(str(x) for x in sorted(enabled))
+                db.set_employee_schedule(uid, sched.get("mode", "weekdays"), weekdays, sched.get("cycle_anchor", datetime.now(settings.timezone).date().isoformat()))
+                await callback.message.answer(_build_employee_schedule_text(uid, settings, db), parse_mode="HTML", reply_markup=_employee_schedule_kb(uid, db))
+            elif action.startswith("sched_mode_week:"):
+                uid = int(action.split(":", 1)[1])
+                sched = db.get_employee_schedule(uid)
+                db.set_employee_schedule(uid, "weekdays", sched.get("weekdays", "0,1,2,3,4,5,6"), sched.get("cycle_anchor", datetime.now(settings.timezone).date().isoformat()))
+                await callback.message.answer(_build_employee_schedule_text(uid, settings, db), parse_mode="HTML", reply_markup=_employee_schedule_kb(uid, db))
+            elif action.startswith("sched_mode_22:"):
+                uid = int(action.split(":", 1)[1])
+                sched = db.get_employee_schedule(uid)
+                db.set_employee_schedule(uid, "cycle_2_2", sched.get("weekdays", "0,1,2,3,4,5,6"), sched.get("cycle_anchor", datetime.now(settings.timezone).date().isoformat()))
+                await callback.message.answer(_build_employee_schedule_text(uid, settings, db), parse_mode="HTML", reply_markup=_employee_schedule_kb(uid, db))
+            elif action.startswith("sched_set_anchor:"):
+                uid = int(action.split(":", 1)[1])
+                await state.set_state(AdminConfigState.wait_schedule_anchor)
+                await state.update_data(schedule_user_id=uid)
+                await callback.message.answer("Введите дату старта цикла 2/2 в формате YYYY-MM-DD")
             elif action == "back_main":
                 await callback.message.answer("🛠 Главное админ-меню", reply_markup=_admin_kb())
             elif action.startswith("emp_add_role:"):
@@ -698,6 +758,22 @@ def build_router(settings: Settings, db: Database) -> Router:
         await _answer_temp(message, f"✅ Сотрудник добавлен: {full_name}{username_part}, роль={role}", delete_request=False)
         await message.answer("👥 Обновлённый список сотрудников", parse_mode="HTML", reply_markup=_employees_kb())
         await message.answer(_build_employees_text(settings), parse_mode="HTML")
+
+    @router.message(AdminConfigState.wait_schedule_anchor)
+    async def cfg_schedule_anchor(message: Message, state: FSMContext) -> None:
+        raw = (message.text or "").strip()
+        try:
+            datetime.strptime(raw, "%Y-%m-%d")
+        except ValueError:
+            await _answer_temp(message, "Неверный формат даты. Используйте YYYY-MM-DD")
+            return
+        data = await state.get_data()
+        uid = int(data.get("schedule_user_id", 0))
+        sched = db.get_employee_schedule(uid)
+        db.set_employee_schedule(uid, sched.get("mode", "cycle_2_2"), sched.get("weekdays", "0,1,2,3,4,5,6"), raw)
+        await state.clear()
+        await _answer_temp(message, f"✅ Дата старта цикла для {uid}: {raw}", delete_request=False)
+        await message.answer(_build_employee_schedule_text(uid, settings, db), parse_mode="HTML", reply_markup=_employee_schedule_kb(uid, db))
 
     @router.message(AdminConfigState.wait_inactivity_minutes)
     async def cfg_inactivity(message: Message, state: FSMContext) -> None:
@@ -866,6 +942,8 @@ def _employees_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📋 Список сотрудников", callback_data="adm:employees_list")],
+            [InlineKeyboardButton(text="📅 Графики сотрудников", callback_data="adm:employees_schedule_menu")],
+            [InlineKeyboardButton(text="🗑 Удалить сотрудника", callback_data="adm:employees_remove_menu")],
             [InlineKeyboardButton(text="➕ Добавить сотрудника (продажи)", callback_data="adm:emp_add_role:sales")],
             [InlineKeyboardButton(text="➕ Добавить сотрудника (логистика)", callback_data="adm:emp_add_role:logistics")],
             [InlineKeyboardButton(text="➕ Добавить сотрудника (финансы)", callback_data="adm:emp_add_role:finance")],
@@ -873,6 +951,61 @@ def _employees_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="ℹ️ Как добавить: сотрудник пишет /myid", callback_data="adm:help")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back_main")],
         ]
+    )
+
+
+def _employees_remove_kb(settings: Settings) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for uid, emp in sorted(settings.employees.items(), key=lambda i: i[0]):
+        rows.append([InlineKeyboardButton(text=f"🗑 {emp.full_name} ({uid})", callback_data=f"adm:emp_remove:{uid}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад к сотрудникам", callback_data="adm:open_employees")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _employees_schedule_kb(settings: Settings) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for uid, emp in sorted(settings.employees.items(), key=lambda i: i[0]):
+        rows.append([InlineKeyboardButton(text=f"📅 {emp.full_name} ({uid})", callback_data=f"adm:emp_schedule:{uid}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад к сотрудникам", callback_data="adm:open_employees")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _employee_schedule_kb(user_id: int, db: Database) -> InlineKeyboardMarkup:
+    sched = db.get_employee_schedule(user_id)
+    enabled = {int(x) for x in sched.get("weekdays", "").split(",") if x.isdigit()}
+    rows: list[list[InlineKeyboardButton]] = []
+    day_buttons = []
+    for wd, label in enumerate(WEEKDAY_LABELS):
+        mark = "✅" if wd in enabled else "⚪"
+        day_buttons.append(InlineKeyboardButton(text=f"{mark} {label}", callback_data=f"adm:sched_toggle:{user_id}:{wd}"))
+    rows.append(day_buttons)
+    rows.append([
+        InlineKeyboardButton(text="🗓 Режим: по дням недели", callback_data=f"adm:sched_mode_week:{user_id}"),
+        InlineKeyboardButton(text="🔁 Режим: 2/2", callback_data=f"adm:sched_mode_22:{user_id}"),
+    ])
+    rows.append([InlineKeyboardButton(text="📌 Указать старт цикла 2/2", callback_data=f"adm:sched_set_anchor:{user_id}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад к выбору сотрудника", callback_data="adm:employees_schedule_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _build_employee_schedule_text(user_id: int, settings: Settings, db: Database) -> str:
+    emp = settings.employees.get(user_id)
+    if not emp:
+        return "⚠️ Сотрудник не найден"
+    sched = db.get_employee_schedule(user_id)
+    mode = sched.get("mode", "weekdays")
+    enabled = {int(x) for x in sched.get("weekdays", "").split(",") if x.isdigit()}
+    day_marks = " ".join(f"{'✅' if i in enabled else '⚪'} {name}" for i, name in enumerate(WEEKDAY_LABELS))
+    mode_text = "По дням недели" if mode == "weekdays" else "Сменный 2/2"
+    today_work = "✅ Сегодня рабочий" if db.is_employee_working_on(user_id, datetime.now(settings.timezone).date()) else "⚪ Сегодня выходной"
+    return (
+        f"<b>📅 График: {emp.full_name}</b>\n"
+        f"ID: <code>{user_id}</code>\n"
+        f"Режим: <b>{mode_text}</b>\n"
+        f"Старт цикла 2/2: <code>{sched.get('cycle_anchor')}</code>\n"
+        f"{today_work}\n\n"
+        f"Дни недели:\n{day_marks}\n\n"
+        "ℹ️ Для 2/2 выберите режим и задайте старт цикла."
     )
 
 

@@ -85,7 +85,11 @@ async def _send_checkin_missing(bot: Bot, settings: Settings, db: Database) -> N
         return
     today = datetime.now(settings.timezone).date().isoformat()
     checked = db.checked_in_user_ids(today)
-    missing = [f"@{emp.username}" if emp.username else emp.full_name for uid, emp in settings.employees.items() if uid not in checked]
+    missing = [
+        f"@{emp.username}" if emp.username else emp.full_name
+        for uid, emp in settings.employees.items()
+        if uid not in checked and db.is_employee_working_on(uid, datetime.now(settings.timezone).date())
+    ]
     await bot.send_message(admin_chat_id, build_missing_report("Чек-ин", today, missing))
 
 
@@ -105,7 +109,11 @@ async def _send_eod_missing(bot: Bot, settings: Settings, db: Database) -> None:
         return
     today = datetime.now(settings.timezone).date().isoformat()
     submitted = db.eod_user_ids(today)
-    missing = [f"@{emp.username}" if emp.username else emp.full_name for uid, emp in settings.employees.items() if uid not in submitted]
+    missing = [
+        f"@{emp.username}" if emp.username else emp.full_name
+        for uid, emp in settings.employees.items()
+        if uid not in submitted and db.is_employee_working_on(uid, datetime.now(settings.timezone).date())
+    ]
     await bot.send_message(admin_chat_id, build_missing_report("EOD", today, missing))
 
 
@@ -156,6 +164,8 @@ async def _check_inactivity(bot: Bot, settings: Settings, db: Database) -> None:
 
     for uid, emp in settings.employees.items():
         if emp.role == "finance" or uid not in checked:
+            continue
+        if not db.is_employee_working_on(uid, now.date()):
             continue
         if db.get_inactivity_alert_count(uid, day) >= 2:
             continue

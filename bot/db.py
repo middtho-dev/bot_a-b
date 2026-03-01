@@ -97,6 +97,13 @@ class Database:
                     alert_count INTEGER NOT NULL,
                     PRIMARY KEY (user_id, day)
                 );
+
+                CREATE TABLE IF NOT EXISTS employee_work_schedule (
+                    user_id INTEGER PRIMARY KEY,
+                    mode TEXT NOT NULL,
+                    weekdays TEXT NOT NULL,
+                    cycle_anchor TEXT NOT NULL
+                );
                 """
             )
 
@@ -330,6 +337,50 @@ class Database:
             return conn.execute(
                 "SELECT user_id, username, full_name, role FROM employees ORDER BY user_id"
             ).fetchall()
+
+    def delete_employee(self, user_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM employees WHERE user_id = ?", (user_id,))
+            conn.execute("DELETE FROM employee_work_schedule WHERE user_id = ?", (user_id,))
+
+    def get_employee_schedule(self, user_id: int) -> dict[str, str]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT mode, weekdays, cycle_anchor FROM employee_work_schedule WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return {"mode": "weekdays", "weekdays": "0,1,2,3,4,5,6", "cycle_anchor": date.today().isoformat()}
+        return {"mode": str(row["mode"]), "weekdays": str(row["weekdays"]), "cycle_anchor": str(row["cycle_anchor"])}
+
+    def set_employee_schedule(self, user_id: int, mode: str, weekdays: str, cycle_anchor: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO employee_work_schedule (user_id, mode, weekdays, cycle_anchor)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    mode = excluded.mode,
+                    weekdays = excluded.weekdays,
+                    cycle_anchor = excluded.cycle_anchor
+                """,
+                (user_id, mode, weekdays, cycle_anchor),
+            )
+
+    def is_employee_working_on(self, user_id: int, target_day: date) -> bool:
+        schedule = self.get_employee_schedule(user_id)
+        mode = schedule.get("mode", "weekdays")
+        if mode == "cycle_2_2":
+            try:
+                anchor = date.fromisoformat(schedule.get("cycle_anchor", target_day.isoformat()))
+            except ValueError:
+                anchor = target_day
+            delta_days = (target_day - anchor).days
+            return delta_days % 4 in {0, 1}
+
+        weekdays_raw = schedule.get("weekdays", "0,1,2,3,4,5,6")
+        enabled = {int(x.strip()) for x in weekdays_raw.split(",") if x.strip().isdigit()}
+        return target_day.weekday() in enabled
 
     def get_sales_between(self, start_day: str, end_day: str) -> list[sqlite3.Row]:
         with self._connect() as conn:
