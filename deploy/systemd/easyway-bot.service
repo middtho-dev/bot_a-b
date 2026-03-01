@@ -1,0 +1,15 @@
+[Unit]
+Description=EasyWay Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bot_a-b
+EnvironmentFile=/opt/bot_a-b/.env
+ExecStart=/opt/bot_a-b/.venv/bin/python -m bot.main
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

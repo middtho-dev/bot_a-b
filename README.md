@@ -164,6 +164,61 @@ pip install -r requirements.txt
 
 ---
 
+
+## 🔁 Автозапуск через systemd (рекомендуется для VPS)
+
+1) Скопируйте сервис-файл:
+
+```bash
+sudo cp deploy/systemd/easyway-bot.service /etc/systemd/system/easyway-bot.service
+```
+
+2) Перечитайте unit-файлы и включите сервис:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable easyway-bot
+sudo systemctl start easyway-bot
+```
+
+3) Проверка статуса и логов:
+
+```bash
+sudo systemctl status easyway-bot
+journalctl -u easyway-bot -f
+```
+
+> Если бот установлен не в `/opt/bot_a-b`, поправьте `WorkingDirectory`, `EnvironmentFile` и `ExecStart` в unit-файле.
+
+---
+
+## 🐳 Автозапуск через Docker (альтернатива)
+
+В репозитории добавлены `Dockerfile` и `docker-compose.yml`.
+
+Запуск:
+
+```bash
+docker compose up -d --build
+```
+
+Проверка:
+
+```bash
+docker compose ps
+docker compose logs -f
+```
+
+Остановка:
+
+```bash
+docker compose down
+```
+
+Контейнер поднимется автоматически после перезагрузки сервера благодаря `restart: unless-stopped`.
+
+---
+
 ## 📁 Структура
 
 ```text
@@ -177,6 +232,10 @@ bot/
 README.md
 requirements.txt
 .env.example
+Dockerfile
+docker-compose.yml
+.dockerignore
+deploy/systemd/easyway-bot.service
 ```
 
 ---
