@@ -1,0 +1,12 @@
+version: "3.9"
+
+services:
+  easyway-bot:
+    build: .
+    container_name: easyway-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./bot_data.sqlite3:/app/bot_data.sqlite3
+      - ./logs:/app/logs
