@@ -9,6 +9,7 @@ from pathlib import Path
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
+from aiogram.filters.state import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -29,6 +30,11 @@ class AdminConfigState(StatesGroup):
     wait_work_end = State()
     wait_inactivity_minutes = State()
     wait_employee_id = State()
+    wait_admin_chat_id = State()
+    wait_general_chat_id = State()
+    wait_sales_chat_id = State()
+    wait_logistics_chat_id = State()
+    wait_work_chat_ids = State()
 
 
 ADMIN_HELP_TEXT = """🛠 <b>Админ-панель EasyWay</b>
@@ -81,7 +87,7 @@ def get_runtime_config(settings: Settings, db: Database) -> RuntimeConfig:
 def build_router(settings: Settings, db: Database) -> Router:
     router = Router()
 
-    @router.message(F.from_user != None, ~F.text.startswith("/"))
+    @router.message(StateFilter(None), F.from_user != None, ~F.text.startswith("/"))
     async def collect_activity(message: Message) -> None:
         user = message.from_user
         if not user or user.id not in settings.employees:
@@ -471,6 +477,8 @@ def build_router(settings: Settings, db: Database) -> Router:
                 await callback.message.answer("⚙️ Меню переменных", reply_markup=_variables_kb())
             elif action == "open_employees":
                 await callback.message.answer("👥 Меню сотрудников", reply_markup=_employees_kb())
+            elif action == "back_main":
+                await callback.message.answer("🛠 Главное админ-меню", reply_markup=_admin_kb())
             elif action.startswith("emp_add_role:"):
                 role = action.split(":", 1)[1]
                 await state.set_state(AdminConfigState.wait_employee_id)
@@ -479,24 +487,24 @@ def build_router(settings: Settings, db: Database) -> Router:
                     f"Введите user_id сотрудника для роли {role}.\n"
                     "Пользователь может узнать ID командой /myid"
                 )
-            elif action == "set_admin_here":
-                db.set_setting("admin_chat_id", str(callback.message.chat.id))
-                await callback.message.answer(f"✅ Admin chat сохранён: {callback.message.chat.id}")
-            elif action == "set_general_here":
-                db.set_setting("general_chat_id", str(callback.message.chat.id))
-                await callback.message.answer(f"✅ General chat сохранён: {callback.message.chat.id}")
-            elif action == "set_sales_here":
-                db.set_setting("sales_chat_id", str(callback.message.chat.id))
-                await callback.message.answer(f"✅ Sales chat сохранён: {callback.message.chat.id}")
-            elif action == "set_logistics_here":
-                db.set_setting("logistics_chat_id", str(callback.message.chat.id))
-                await callback.message.answer(f"✅ Logistics chat сохранён: {callback.message.chat.id}")
-            elif action == "add_work_here":
-                _set_work_chat(db, settings, callback.message.chat.id, add=True)
-                await callback.message.answer(f"✅ Чат добавлен в WORK_CHAT_IDS: {callback.message.chat.id}")
-            elif action == "remove_work_here":
-                _set_work_chat(db, settings, callback.message.chat.id, add=False)
-                await callback.message.answer(f"🧹 Чат удалён из WORK_CHAT_IDS: {callback.message.chat.id}")
+            elif action == "ask_admin_chat":
+                await state.set_state(AdminConfigState.wait_admin_chat_id)
+                await callback.message.answer("Введите ADMIN_CHAT_ID (например -1001234567890). Подсказка: /chatinfo")
+            elif action == "ask_general_chat":
+                await state.set_state(AdminConfigState.wait_general_chat_id)
+                await callback.message.answer("Введите GENERAL_CHAT_ID (например -1001234567890). Подсказка: /chatinfo")
+            elif action == "ask_sales_chat":
+                await state.set_state(AdminConfigState.wait_sales_chat_id)
+                await callback.message.answer("Введите SALES_CHAT_ID. Подсказка: /chatinfo")
+            elif action == "ask_logistics_chat":
+                await state.set_state(AdminConfigState.wait_logistics_chat_id)
+                await callback.message.answer("Введите LOGISTICS_CHAT_ID. Подсказка: /chatinfo")
+            elif action == "ask_work_chats":
+                await state.set_state(AdminConfigState.wait_work_chat_ids)
+                await callback.message.answer(
+                    "Введите WORK_CHAT_IDS через запятую.\n"
+                    "Пример: -1001111111111,-1002222222222"
+                )
             elif action == "show_cfg":
                 await callback.message.answer(_build_runtime_overview(db, settings))
             elif action == "ask_report":
@@ -574,6 +582,45 @@ def build_router(settings: Settings, db: Database) -> Router:
         logger.info("👤 employee added from menu user_id=%s role=%s", uid, role)
         await _answer_temp(message, f"✅ Сотрудник добавлен: {uid} ({role})")
 
+    @router.message(AdminConfigState.wait_inactivity_minutes)
+    async def cfg_inactivity(message: Message, state: FSMContext) -> None:
+        val = (message.text or "").strip()
+        if not val.isdigit():
+            await _answer_temp(message, "Введите целое число минут")
+            return
+        db.set_setting("inactivity_minutes", val)
+        await state.clear()
+        logger.info("⚙️ setting updated inactivity_minutes=%s", val)
+        await _answer_temp(message, f"✅ INACTIVITY_MINUTES={val}")
+
+    @router.message(AdminConfigState.wait_admin_chat_id)
+    async def cfg_admin_chat_id(message: Message, state: FSMContext) -> None:
+        await _save_chat_id_setting(message, state, db, "admin_chat_id")
+
+    @router.message(AdminConfigState.wait_general_chat_id)
+    async def cfg_general_chat_id(message: Message, state: FSMContext) -> None:
+        await _save_chat_id_setting(message, state, db, "general_chat_id")
+
+    @router.message(AdminConfigState.wait_sales_chat_id)
+    async def cfg_sales_chat_id(message: Message, state: FSMContext) -> None:
+        await _save_chat_id_setting(message, state, db, "sales_chat_id")
+
+    @router.message(AdminConfigState.wait_logistics_chat_id)
+    async def cfg_logistics_chat_id(message: Message, state: FSMContext) -> None:
+        await _save_chat_id_setting(message, state, db, "logistics_chat_id")
+
+    @router.message(AdminConfigState.wait_work_chat_ids)
+    async def cfg_work_chat_ids(message: Message, state: FSMContext) -> None:
+        raw = (message.text or "").strip()
+        parsed = [x.strip() for x in raw.split(",") if x.strip()]
+        if not parsed or not all(v.lstrip("-").isdigit() for v in parsed):
+            await _answer_temp(message, "Формат неверный. Пример: -1001111111111,-1002222222222")
+            return
+        db.set_setting("work_chat_ids", ",".join(parsed))
+        await state.clear()
+        logger.info("⚙️ setting updated work_chat_ids=%s", ",".join(parsed))
+        await _answer_temp(message, f"✅ WORK_CHAT_IDS сохранены ({len(parsed)} чатов)")
+
     return router
 
 
@@ -606,6 +653,17 @@ async def _save_time_setting(message: Message, state: FSMContext, db: Database, 
     await state.clear()
     logger.info("⚙️ setting updated %s=%s", key, val)
     await _answer_temp(message, f"✅ {key.upper()}={val}")
+
+
+async def _save_chat_id_setting(message: Message, state: FSMContext, db: Database, key: str) -> None:
+    raw = (message.text or "").strip()
+    if not raw.lstrip("-").isdigit():
+        await _answer_temp(message, "Введите корректный ID чата (число)")
+        return
+    db.set_setting(key, raw)
+    await state.clear()
+    logger.info("⚙️ setting updated %s=%s", key, raw)
+    await _answer_temp(message, f"✅ {key.upper()}={raw}")
 
 
 async def _finish_shipment(message: Message, state: FSMContext, settings: Settings, db: Database, delay_reason: str) -> None:
@@ -665,12 +723,11 @@ def _admin_kb() -> InlineKeyboardMarkup:
 def _variables_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="⚙️ Установить ADMIN_CHAT_ID = этот чат", callback_data="adm:set_admin_here")],
-            [InlineKeyboardButton(text="⚙️ Установить GENERAL_CHAT_ID = этот чат", callback_data="adm:set_general_here")],
-            [InlineKeyboardButton(text="⚙️ Установить SALES_CHAT_ID = этот чат", callback_data="adm:set_sales_here")],
-            [InlineKeyboardButton(text="⚙️ Установить LOGISTICS_CHAT_ID = этот чат", callback_data="adm:set_logistics_here")],
-            [InlineKeyboardButton(text="➕ Добавить этот чат в WORK_CHAT_IDS", callback_data="adm:add_work_here")],
-            [InlineKeyboardButton(text="➖ Убрать этот чат из WORK_CHAT_IDS", callback_data="adm:remove_work_here")],
+            [InlineKeyboardButton(text="🧾 Ввести ADMIN_CHAT_ID", callback_data="adm:ask_admin_chat")],
+            [InlineKeyboardButton(text="🧾 Ввести GENERAL_CHAT_ID", callback_data="adm:ask_general_chat")],
+            [InlineKeyboardButton(text="🧾 Ввести SALES_CHAT_ID", callback_data="adm:ask_sales_chat")],
+            [InlineKeyboardButton(text="🧾 Ввести LOGISTICS_CHAT_ID", callback_data="adm:ask_logistics_chat")],
+            [InlineKeyboardButton(text="🧾 Ввести WORK_CHAT_IDS", callback_data="adm:ask_work_chats")],
             [InlineKeyboardButton(text="🕒 Настроить REPORT_TIME", callback_data="adm:ask_report")],
             [InlineKeyboardButton(text="🌅 Настроить CHECKIN_TIME", callback_data="adm:ask_checkin")],
             [InlineKeyboardButton(text="🌆 Настроить EOD_TIME", callback_data="adm:ask_eod")],
@@ -678,6 +735,7 @@ def _variables_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🔴 Настроить WORK_END", callback_data="adm:ask_work_end")],
             [InlineKeyboardButton(text="⏱ Настроить INACTIVITY_MINUTES", callback_data="adm:ask_inactivity")],
             [InlineKeyboardButton(text="📌 Показать текущую конфигурацию", callback_data="adm:show_cfg")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back_main")],
         ]
     )
 
@@ -689,7 +747,8 @@ def _employees_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="➕ Добавить сотрудника (logistics)", callback_data="adm:emp_add_role:logistics")],
             [InlineKeyboardButton(text="➕ Добавить сотрудника (finance)", callback_data="adm:emp_add_role:finance")],
             [InlineKeyboardButton(text="➕ Добавить сотрудника (general)", callback_data="adm:emp_add_role:general")],
-            [InlineKeyboardButton(text="ℹ️ В чате сотрудник может узнать ID: /myid", callback_data="adm:menu")],
+            [InlineKeyboardButton(text="ℹ️ Подсказка: сотрудник пишет /myid", callback_data="adm:menu")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back_main")],
         ]
     )
 
