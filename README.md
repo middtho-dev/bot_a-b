@@ -48,8 +48,9 @@
 ## Быстрый запуск в контейнере
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 cp .env.example .env
 # заполните .env
@@ -79,4 +80,34 @@ bot/
   reports.py
   scheduler.py
   main.py
+```
+
+
+## Troubleshooting (Ubuntu 24+/Python 3.12)
+
+Если при запуске видите ошибку `ZoneInfoNotFoundError: No time zone found with key Europe/Dubai`, установите timezone data:
+
+```bash
+# вариант 1: системно
+sudo apt update && sudo apt install -y tzdata
+
+# вариант 2: в virtualenv
+source .venv/bin/activate
+pip install tzdata
+```
+
+Если нет команды `python`, используйте `python3` для создания venv.
+
+## Как обновиться с GitHub на сервере
+
+```bash
+cd /opt/bot_a-b
+source .venv/bin/activate
+git fetch --all
+git checkout main
+git pull --ff-only origin main
+pip install -r requirements.txt
+# если используете systemd
+sudo systemctl restart easyway-bot
+sudo systemctl status easyway-bot --no-pager
 ```
