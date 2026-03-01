@@ -78,7 +78,7 @@ def get_runtime_config(settings: Settings, db: Database) -> RuntimeConfig:
 def build_router(settings: Settings, db: Database) -> Router:
     router = Router()
 
-    @router.message(F.from_user != None)
+    @router.message(F.from_user != None, ~F.text.startswith("/"))
     async def collect_activity(message: Message) -> None:
         user = message.from_user
         if not user or user.id not in settings.employees:
