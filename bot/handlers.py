@@ -28,6 +28,7 @@ class AdminConfigState(StatesGroup):
     wait_work_start = State()
     wait_work_end = State()
     wait_inactivity_minutes = State()
+    wait_employee_id = State()
 
 
 ADMIN_HELP_TEXT = """🛠 <b>Админ-панель EasyWay</b>
@@ -42,6 +43,8 @@ ADMIN_HELP_TEXT = """🛠 <b>Админ-панель EasyWay</b>
 • /eod — запуск вечерней формы
 • /sale — форма продажи (только Sales чат)
 • /shipment — форма отправки (только Logistics чат)
+• /myid — показать ваш user_id (для добавления в систему)
+• /chatinfo — показать ID текущего чата
 • /add_employee role=sales|logistics|finance|general — reply на сотрудника
 • /export csv — выгрузка активности
 
@@ -130,9 +133,48 @@ def build_router(settings: Settings, db: Database) -> Router:
     async def cmd_eod(message: Message, state: FSMContext) -> None:
         if not message.from_user or message.from_user.id not in settings.employees:
             return
+        if message.chat.type != "private":
+            await _safe_delete_message(message)
+            await message.answer(
+                "📝 Для заполнения вечернего отчёта откройте личный чат с ботом и нажмите кнопку ниже.",
+                reply_markup=await _eod_private_kb(message),
+            )
+            return
         await state.set_state(EODStates.done_today)
         await _safe_delete_message(message)
         await message.answer("Вечерний отчёт\n1) Сделано сегодня?")
+
+    @router.message(Command("start"))
+    async def cmd_start(message: Message, command: CommandObject, state: FSMContext) -> None:
+        args = (command.args or "").strip().lower()
+        if args == "eod":
+            if not message.from_user or message.from_user.id not in settings.employees:
+                await message.answer("⛔ Вы не зарегистрированы как сотрудник. Обратитесь к администратору.")
+                return
+            await state.set_state(EODStates.done_today)
+            await message.answer("Вечерний отчёт\n1) Сделано сегодня?")
+            return
+        await message.answer("👋 Бот активен. Для админ-меню используйте /admin")
+
+    @router.message(Command("myid"))
+    async def cmd_myid(message: Message) -> None:
+        uid = message.from_user.id if message.from_user else None
+        await message.answer(
+            f"🆔 Ваш user_id: <code>{uid}</code>\n"
+            "Передайте этот ID администратору, если нужно добавить вас вручную.",
+            parse_mode="HTML",
+        )
+
+    @router.message(Command("chatinfo"))
+    async def cmd_chatinfo(message: Message) -> None:
+        title = message.chat.title or message.chat.full_name or "(без названия)"
+        await message.answer(
+            f"💬 Chat info\n"
+            f"• title: {title}\n"
+            f"• type: {message.chat.type}\n"
+            f"• id: <code>{message.chat.id}</code>",
+            parse_mode="HTML",
+        )
 
     @router.message(EODStates.done_today)
     async def eod_done(message: Message, state: FSMContext) -> None:
@@ -425,6 +467,18 @@ def build_router(settings: Settings, db: Database) -> Router:
                     await callback.answer("Лог-файл пока не создан", show_alert=True)
                     return
                 await callback.message.answer_document(FSInputFile(str(log_path)))
+            elif action == "open_vars":
+                await callback.message.answer("⚙️ Меню переменных", reply_markup=_variables_kb())
+            elif action == "open_employees":
+                await callback.message.answer("👥 Меню сотрудников", reply_markup=_employees_kb())
+            elif action.startswith("emp_add_role:"):
+                role = action.split(":", 1)[1]
+                await state.set_state(AdminConfigState.wait_employee_id)
+                await state.update_data(add_role=role)
+                await callback.message.answer(
+                    f"Введите user_id сотрудника для роли {role}.\n"
+                    "Пользователь может узнать ID командой /myid"
+                )
             elif action == "set_admin_here":
                 db.set_setting("admin_chat_id", str(callback.message.chat.id))
                 await callback.message.answer(f"✅ Admin chat сохранён: {callback.message.chat.id}")
@@ -464,7 +518,8 @@ def build_router(settings: Settings, db: Database) -> Router:
                 await state.set_state(AdminConfigState.wait_inactivity_minutes)
                 await callback.message.answer("Введите INACTIVITY_MINUTES (например 60)")
             elif action == "menu":
-                await callback.answer("♻️ Меню уже актуально")
+                await callback.message.answer(ADMIN_HELP_TEXT, parse_mode="HTML", reply_markup=_admin_kb())
+                await callback.answer("♻️ Меню обновлено")
                 return
             else:
                 await callback.answer("Неизвестная команда", show_alert=True)
@@ -504,16 +559,20 @@ def build_router(settings: Settings, db: Database) -> Router:
     async def cfg_work_end(message: Message, state: FSMContext) -> None:
         await _save_time_setting(message, state, db, "work_end")
 
-    @router.message(AdminConfigState.wait_inactivity_minutes)
-    async def cfg_inactivity(message: Message, state: FSMContext) -> None:
-        val = (message.text or "").strip()
-        if not val.isdigit():
-            await _answer_temp(message, "Введите целое число минут")
+    @router.message(AdminConfigState.wait_employee_id)
+    async def cfg_employee_id(message: Message, state: FSMContext) -> None:
+        raw = (message.text or "").strip()
+        if not raw.lstrip("-").isdigit():
+            await _answer_temp(message, "Введите корректный user_id (число)")
             return
-        db.set_setting("inactivity_minutes", val)
+        data = await state.get_data()
+        role = str(data.get("add_role", "general"))
+        uid = int(raw)
+        db.upsert_employee(uid, username=f"user_{uid}", full_name=f"User {uid}", role=role)
+        settings.employees[uid] = Employee(uid, f"user_{uid}", f"User {uid}", role)
         await state.clear()
-        logger.info("⚙️ setting updated inactivity_minutes=%s", val)
-        await _answer_temp(message, f"✅ INACTIVITY_MINUTES={val}")
+        logger.info("👤 employee added from menu user_id=%s role=%s", uid, role)
+        await _answer_temp(message, f"✅ Сотрудник добавлен: {uid} ({role})")
 
     return router
 
@@ -586,15 +645,26 @@ async def _answer_temp(message: Message, text: str, delete_request: bool = True,
 def _admin_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🚀 Отправить Check-in кнопку", callback_data="adm:checkin_prompt")],
+            [InlineKeyboardButton(text="📚 Инструкции и команды", callback_data="adm:menu")],
+            [InlineKeyboardButton(text="🚀 Check-in prompt", callback_data="adm:checkin_prompt")],
             [InlineKeyboardButton(text="📋 Кто НЕ чек-ин", callback_data="adm:checkin_missing")],
-            [InlineKeyboardButton(text="🌆 Отправить EOD", callback_data="adm:eod_prompt")],
+            [InlineKeyboardButton(text="🌆 EOD prompt", callback_data="adm:eod_prompt")],
             [InlineKeyboardButton(text="📭 Кто НЕ сдал EOD", callback_data="adm:eod_missing")],
             [InlineKeyboardButton(text="📊 Daily report", callback_data="adm:daily")],
             [InlineKeyboardButton(text="🗓 Weekly + KPI", callback_data="adm:weekly")],
             [InlineKeyboardButton(text="⚠️ Проверка неактивности", callback_data="adm:inactivity")],
+            [InlineKeyboardButton(text="⚙️ Меню переменных", callback_data="adm:open_vars")],
+            [InlineKeyboardButton(text="👥 Меню сотрудников", callback_data="adm:open_employees")],
             [InlineKeyboardButton(text="📄 Последние 50 строк лога", callback_data="adm:logs_tail")],
             [InlineKeyboardButton(text="⬇️ Скачать лог", callback_data="adm:logs_file")],
+            [InlineKeyboardButton(text="♻️ Обновить меню", callback_data="adm:menu")],
+        ]
+    )
+
+
+def _variables_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
             [InlineKeyboardButton(text="⚙️ Установить ADMIN_CHAT_ID = этот чат", callback_data="adm:set_admin_here")],
             [InlineKeyboardButton(text="⚙️ Установить GENERAL_CHAT_ID = этот чат", callback_data="adm:set_general_here")],
             [InlineKeyboardButton(text="⚙️ Установить SALES_CHAT_ID = этот чат", callback_data="adm:set_sales_here")],
@@ -608,9 +678,26 @@ def _admin_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🔴 Настроить WORK_END", callback_data="adm:ask_work_end")],
             [InlineKeyboardButton(text="⏱ Настроить INACTIVITY_MINUTES", callback_data="adm:ask_inactivity")],
             [InlineKeyboardButton(text="📌 Показать текущую конфигурацию", callback_data="adm:show_cfg")],
-            [InlineKeyboardButton(text="♻️ Обновить меню", callback_data="adm:menu")],
         ]
     )
+
+
+def _employees_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Добавить сотрудника (sales)", callback_data="adm:emp_add_role:sales")],
+            [InlineKeyboardButton(text="➕ Добавить сотрудника (logistics)", callback_data="adm:emp_add_role:logistics")],
+            [InlineKeyboardButton(text="➕ Добавить сотрудника (finance)", callback_data="adm:emp_add_role:finance")],
+            [InlineKeyboardButton(text="➕ Добавить сотрудника (general)", callback_data="adm:emp_add_role:general")],
+            [InlineKeyboardButton(text="ℹ️ В чате сотрудник может узнать ID: /myid", callback_data="adm:menu")],
+        ]
+    )
+
+
+async def _eod_private_kb(message: Message) -> InlineKeyboardMarkup:
+    me = await message.bot.get_me()
+    url = f"https://t.me/{me.username}?start=eod"
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📝 Заполнить EOD в личке", url=url)]])
 
 
 def _set_work_chat(db: Database, settings: Settings, chat_id: int, add: bool) -> None:

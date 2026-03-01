@@ -93,7 +93,10 @@ async def _send_eod_prompt(bot: Bot, settings: Settings, db: Database) -> None:
     general_chat_id = get_runtime_chat_id(db, settings, "general_chat_id")
     if not general_chat_id:
         return
-    await bot.send_message(general_chat_id, "Заполните вечерний отчёт. Команда: /eod")
+    me = await bot.get_me()
+    url = f"https://t.me/{me.username}?start=eod"
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📝 Заполнить EOD в личке", url=url)]])
+    await bot.send_message(general_chat_id, "Заполните вечерний отчёт. Нажмите кнопку ниже и заполните форму в личном чате с ботом.", reply_markup=kb)
 
 
 async def _send_eod_missing(bot: Bot, settings: Settings, db: Database) -> None:
