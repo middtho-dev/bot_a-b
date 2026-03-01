@@ -18,8 +18,6 @@ async def run() -> None:
     db = Database(settings.db_path)
 
     bot = Bot(settings.bot_token)
-    bot["settings"] = settings
-    bot["db"] = db
 
     dp = Dispatcher()
     dp.include_router(build_router(settings, db))

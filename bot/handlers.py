@@ -197,11 +197,11 @@ def build_router(settings: Settings, db: Database) -> Router:
             await state.set_state(ShipmentStates.delay_reason)
             await message.answer("Причина задержки?")
             return
-        await _finish_shipment(message, state, "")
+        await _finish_shipment(message, state, settings, db, "")
 
     @router.message(ShipmentStates.delay_reason)
     async def shipment_delay_reason(message: Message, state: FSMContext) -> None:
-        await _finish_shipment(message, state, message.text or "")
+        await _finish_shipment(message, state, settings, db, message.text or "")
 
     @router.message(Command("status"))
     async def cmd_status(message: Message) -> None:
@@ -285,10 +285,14 @@ def build_router(settings: Settings, db: Database) -> Router:
     return router
 
 
-async def _finish_shipment(message: Message, state: FSMContext, delay_reason: str) -> None:
+async def _finish_shipment(
+    message: Message,
+    state: FSMContext,
+    settings: Settings,
+    db: Database,
+    delay_reason: str,
+) -> None:
     data = await state.get_data()
-    settings: Settings = message.bot["settings"]
-    db: Database = message.bot["db"]
     now = datetime.now(settings.timezone)
     uid = int(message.from_user.id) if message.from_user else 0
     db.save_shipment(
