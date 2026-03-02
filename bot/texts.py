@@ -228,3 +228,15 @@ REPORT_TEXTS.update({
 })
 
 WEEKDAY_LABELS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+
+
+REPORT_TEXTS.update({
+    "daily_subtitle": "Активность сотрудников за день:",
+    "daily_line_active": "{role} • {full_name}: {count} сообщений ({first}–{last})",
+    "daily_line_zero": "{role} • {full_name}: 0 сообщений",
+    "daily_total_title": "Итого по отделам:",
+    "daily_total_line": "- {role}: {count}",
+    "weekly_subtitle": "Сводка за 7 дней:",
+    "kpi_sales_line": "- {full_name}: сделок={deals}, сумма={amount:.2f} AED",
+    "kpi_logistics_line": "- {full_name}: отправок={shipments}, задержек={delayed}",
+})

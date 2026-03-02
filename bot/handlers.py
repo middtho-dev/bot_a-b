@@ -91,10 +91,12 @@ def get_runtime_config(settings: Settings, db: Database) -> RuntimeConfig:
 def build_router(settings: Settings, db: Database) -> Router:
     router = Router()
 
-    @router.message(StateFilter(None), F.from_user != None, ~F.text.startswith("/"))
+    @router.message(StateFilter(None), F.from_user != None)
     async def collect_activity(message: Message) -> None:
         user = message.from_user
         if not user or user.id not in settings.employees:
+            return
+        if message.text and message.text.startswith("/"):
             return
         work_chats = scheduler_jobs.get_runtime_work_chat_ids(db, settings)
         if message.chat.id not in work_chats:
@@ -152,7 +154,7 @@ def build_router(settings: Settings, db: Database) -> Router:
             return
         await state.set_state(EODStates.done_today)
         await _safe_delete_message(message)
-        await message.answer(HANDLER_TEXTS["eod_q1"])
+        await _ask_and_track(message, state, HANDLER_TEXTS["eod_q1"])
 
     @router.message(Command("start"))
     async def cmd_start(message: Message, command: CommandObject, state: FSMContext) -> None:
@@ -162,7 +164,7 @@ def build_router(settings: Settings, db: Database) -> Router:
                 await message.answer(HANDLER_TEXTS["not_registered"])
                 return
             await state.set_state(EODStates.done_today)
-            await message.answer(HANDLER_TEXTS["eod_q1"])
+            await _ask_and_track(message, state, HANDLER_TEXTS["eod_q1"])
             return
         await message.answer(HANDLER_TEXTS["start_hint"])
 
@@ -190,21 +192,21 @@ def build_router(settings: Settings, db: Database) -> Router:
         await state.update_data(done_today=message.text or "")
         await state.set_state(EODStates.in_progress)
         await _safe_delete_message(message)
-        await message.answer(HANDLER_TEXTS["eod_q2"])
+        await _ask_and_track(message, state, HANDLER_TEXTS["eod_q2"])
 
     @router.message(EODStates.in_progress)
     async def eod_progress(message: Message, state: FSMContext) -> None:
         await state.update_data(in_progress=message.text or "")
         await state.set_state(EODStates.problems)
         await _safe_delete_message(message)
-        await message.answer(HANDLER_TEXTS["eod_q3"])
+        await _ask_and_track(message, state, HANDLER_TEXTS["eod_q3"])
 
     @router.message(EODStates.problems)
     async def eod_problems(message: Message, state: FSMContext) -> None:
         await state.update_data(problems=message.text or "")
         await state.set_state(EODStates.need_help)
         await _safe_delete_message(message)
-        await message.answer(HANDLER_TEXTS["eod_q4"])
+        await _ask_and_track(message, state, HANDLER_TEXTS["eod_q4"])
 
     @router.message(EODStates.need_help)
     async def eod_finish(message: Message, state: FSMContext) -> None:
@@ -220,6 +222,7 @@ def build_router(settings: Settings, db: Database) -> Router:
             need_help=message.text or "",
             submitted_at=now.isoformat(timespec="seconds"),
         )
+        await _delete_tracked_prompt(message, state)
         await state.clear()
         await _safe_delete_message(message)
         logger.info("🌆 eod submitted user_id=%s day=%s", uid, now.date().isoformat())
@@ -236,14 +239,14 @@ def build_router(settings: Settings, db: Database) -> Router:
             return
         await _safe_delete_message(message)
         await state.set_state(SaleStates.client)
-        await message.answer(HANDLER_TEXTS["sale_q_client"])
+        await _ask_and_track(message, state, HANDLER_TEXTS["sale_q_client"])
 
     @router.message(SaleStates.client)
     async def sale_client(message: Message, state: FSMContext) -> None:
         await state.update_data(client=message.text or "")
         await state.set_state(SaleStates.amount)
         await _safe_delete_message(message)
-        await message.answer(HANDLER_TEXTS["sale_q_amount"])
+        await _ask_and_track(message, state, HANDLER_TEXTS["sale_q_amount"])
 
     @router.message(SaleStates.amount)
     async def sale_amount(message: Message, state: FSMContext) -> None:
@@ -255,7 +258,7 @@ def build_router(settings: Settings, db: Database) -> Router:
         await state.update_data(amount=amount)
         await state.set_state(SaleStates.status)
         await _safe_delete_message(message)
-        await message.answer(HANDLER_TEXTS["sale_q_status"])
+        await _ask_and_track(message, state, HANDLER_TEXTS["sale_q_status"])
 
     @router.message(SaleStates.status)
     async def sale_status(message: Message, state: FSMContext) -> None:
@@ -266,7 +269,7 @@ def build_router(settings: Settings, db: Database) -> Router:
         await state.update_data(status=status)
         await state.set_state(SaleStates.comment)
         await _safe_delete_message(message)
-        await message.answer(HANDLER_TEXTS["sale_q_comment"])
+        await _ask_and_track(message, state, HANDLER_TEXTS["sale_q_comment"])
 
     @router.message(SaleStates.comment)
     async def sale_finish(message: Message, state: FSMContext) -> None:
@@ -298,14 +301,14 @@ def build_router(settings: Settings, db: Database) -> Router:
             return
         await _safe_delete_message(message)
         await state.set_state(ShipmentStates.client_number)
-        await message.answer(HANDLER_TEXTS["shipment_q_client"])
+        await _ask_and_track(message, state, HANDLER_TEXTS["shipment_q_client"])
 
     @router.message(ShipmentStates.client_number)
     async def shipment_client(message: Message, state: FSMContext) -> None:
         await state.update_data(client_number=message.text or "")
         await state.set_state(ShipmentStates.status)
         await _safe_delete_message(message)
-        await message.answer(HANDLER_TEXTS["shipment_q_status"])
+        await _ask_and_track(message, state, HANDLER_TEXTS["shipment_q_status"])
 
     @router.message(ShipmentStates.status)
     async def shipment_status(message: Message, state: FSMContext) -> None:
@@ -317,7 +320,7 @@ def build_router(settings: Settings, db: Database) -> Router:
         await _safe_delete_message(message)
         if status == "delayed":
             await state.set_state(ShipmentStates.delay_reason)
-            await message.answer(HANDLER_TEXTS["shipment_q_delay"])
+            await _ask_and_track(message, state, HANDLER_TEXTS["shipment_q_delay"])
             return
         await _finish_shipment(message, state, settings, db, "")
 
@@ -790,7 +793,25 @@ async def _finish_shipment(message: Message, state: FSMContext, settings: Settin
     db.save_shipment(user_id=uid, day=now.date().isoformat(), client_number=str(data.get("client_number", "")), status=str(data.get("status", "created")), delay_reason=delay_reason, created_at=now.isoformat(timespec="seconds"))
     logger.info("📦 shipment saved user_id=%s status=%s", uid, data.get("status"))
     await message.answer(HANDLER_TEXTS["shipment_saved"].format(client=data.get("client_number"), status=data.get("status")))
+    await _delete_tracked_prompt(message, state)
     await state.clear()
+
+
+async def _delete_tracked_prompt(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    prompt_id = data.get("last_bot_prompt_id")
+    if not prompt_id:
+        return
+    try:
+        await message.bot.delete_message(chat_id=message.chat.id, message_id=int(prompt_id))
+    except Exception:
+        return
+
+
+async def _ask_and_track(message: Message, state: FSMContext, text: str) -> None:
+    await _delete_tracked_prompt(message, state)
+    msg = await message.answer(text)
+    await state.update_data(last_bot_prompt_id=msg.message_id)
 
 
 async def _safe_delete_message(message: Message | None) -> None:

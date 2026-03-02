@@ -26,22 +26,22 @@ def build_daily_report(target_day: date, rows: list[DailyActivity], employees: d
         item["first"] = row.first_activity_at if not item["first"] else min(str(item["first"]), row.first_activity_at)
         item["last"] = row.last_activity_at if not item["last"] else max(str(item["last"]), row.last_activity_at)
 
-    lines = [REPORT_TEXTS["daily_title"].format(day=target_day.isoformat()), ""]
+    lines = [REPORT_TEXTS["daily_title"].format(day=target_day.isoformat()), REPORT_TEXTS["daily_subtitle"], ""]
     for user_id, employee in employees.items():
         role = _role_label(employee.role)
         current = by_user.get(user_id)
         if not current:
-            lines.append(f"{role} • {employee.full_name} — 0 сообщений")
+            lines.append(REPORT_TEXTS["daily_line_zero"].format(role=role, full_name=employee.full_name))
             continue
         count = int(current["count"])
         first = _short_ts(str(current["first"]))
         last = _short_ts(str(current["last"]))
-        lines.append(f"{role} • {employee.full_name} — {count} сообщений ({first}–{last})")
+        lines.append(REPORT_TEXTS["daily_line_active"].format(role=role, full_name=employee.full_name, count=count, first=first, last=last))
         dept_totals[employee.role] += count
 
     lines.append("\nИтого по отделам:")
     for role in sorted({emp.role for emp in employees.values()}):
-        lines.append(f"- {_role_label(role)}: {dept_totals.get(role, 0)}")
+        lines.append(REPORT_TEXTS["daily_total_line"].format(role=_role_label(role), count=dept_totals.get(role, 0)))
     return "\n".join(lines)
 
 
@@ -53,7 +53,7 @@ def build_weekly_report(end_day: date, rows: list[DailyActivity], employees: dic
     for row in rows:
         by_user_day[row.user_id][row.day] += row.message_count
 
-    lines = [REPORT_TEXTS["weekly_title"].format(start=start_day.isoformat(), end=end_day.isoformat()), ""]
+    lines = [REPORT_TEXTS["weekly_title"].format(start=start_day.isoformat(), end=end_day.isoformat()), REPORT_TEXTS["weekly_subtitle"], ""]
     for user_id, employee in employees.items():
         counters = by_user_day.get(user_id, {})
         total = sum(counters.values())
@@ -100,13 +100,13 @@ def build_kpi_block(
         if emp.role != "sales":
             continue
         item = sales_by_user.get(uid, {"count": 0, "sum": 0.0})
-        lines.append(f"- {emp.full_name}: сделок={int(item['count'])}, сумма={item['sum']:.2f} AED")
+        lines.append(REPORT_TEXTS["kpi_sales_line"].format(full_name=emp.full_name, deals=int(item["count"]), amount=item["sum"]))
 
     lines.append(REPORT_TEXTS["kpi_logistics"])
     for uid, emp in employees.items():
         if emp.role != "logistics":
             continue
         item = shipment_by_user.get(uid, {"count": 0, "delayed": 0})
-        lines.append(f"- {emp.full_name}: отправок={item['count']}, задержек={item['delayed']}")
+        lines.append(REPORT_TEXTS["kpi_logistics_line"].format(full_name=emp.full_name, shipments=item["count"], delayed=item["delayed"]))
 
     return "\n".join(lines)

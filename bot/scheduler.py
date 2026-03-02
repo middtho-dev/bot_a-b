@@ -56,7 +56,18 @@ def get_runtime_work_chat_ids(db: Database, settings: Settings) -> set[int]:
     raw = db.get_setting("work_chat_ids")
     if raw:
         return {int(x.strip()) for x in raw.split(",") if x.strip()}
-    return set(settings.work_chat_ids)
+
+    default_work = set(settings.work_chat_ids)
+    if default_work:
+        return default_work
+
+    # Fallback: if dedicated list is not configured yet, use main operational chats.
+    fallback = {
+        int(settings.general_chat_id),
+        int(settings.sales_chat_id),
+        int(settings.logistics_chat_id),
+    }
+    return {chat_id for chat_id in fallback if chat_id}
 
 
 def get_runtime_inactivity_minutes(db: Database, settings: Settings) -> int:
