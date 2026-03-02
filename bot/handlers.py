@@ -41,6 +41,38 @@ class AdminConfigState(StatesGroup):
     wait_schedule_anchor = State()
 
 
+<<<<<<< codex/implement-telegram-bot-for-team-activities-rcw4lm
+=======
+ADMIN_HELP_TEXT = """🛠 <b>Админ-панель EasyWay</b>
+
+👋 Здесь можно проверить все функции бота и настроить рабочую конфигурацию <b>без .env</b>.
+
+<b>📌 Основные команды:</b>
+• /status — состояние бота
+• /report today — дневной отчёт вручную
+• /week — недельный отчёт + KPI
+• /checkin — ручной check-in
+• /eod — запуск вечерней формы
+• /sale — форма продажи (только Sales чат)
+• /shipment — форма отправки (только Logistics чат)
+• /myid — показать ваш user_id (для добавления в систему)
+• /chatinfo — показать ID текущего чата
+• /add_employee role=sales|logistics|finance|general — reply на сотрудника
+• /export_csv — выгрузка активности
+• /export csv — старый формат (оставлен для совместимости)
+
+<b>⚙️ Настройки через меню:</b>
+• ID чатов (admin/general/sales/logistics)
+• рабочие чаты
+• времена check-in/eod/report
+• рабочие часы
+• порог неактивности
+
+<b>🧪 Тестовые кнопки:</b>
+• имитация check-in/eod/report/inactivity
+• просмотр/скачивание логов
+"""
+>>>>>>> main
 
 
 @dataclass
@@ -867,7 +899,25 @@ async def _answer_temp(message: Message, text: str, delete_request: bool = True,
 
 def _admin_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
+<<<<<<< codex/implement-telegram-bot-for-team-activities-rcw4lm
         inline_keyboard=[[InlineKeyboardButton(text=text, callback_data=callback)] for text, callback in ADMIN_MENU_BUTTONS]
+=======
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚀 Отправить чек-ин", callback_data="adm:checkin_prompt")],
+            [InlineKeyboardButton(text="📋 Кто НЕ чек-ин", callback_data="adm:checkin_missing")],
+            [InlineKeyboardButton(text="🌆 Отправить напоминание о EOD", callback_data="adm:eod_prompt")],
+            [InlineKeyboardButton(text="📭 Кто не сдал EOD", callback_data="adm:eod_missing")],
+            [InlineKeyboardButton(text="📊 Отправить дневной отчёт", callback_data="adm:daily")],
+            [InlineKeyboardButton(text="🗓 Отправить недельный отчёт + KPI", callback_data="adm:weekly")],
+            [InlineKeyboardButton(text="⚠️ Проверка неактивности", callback_data="adm:inactivity")],
+            [InlineKeyboardButton(text="⚙️ Меню переменных", callback_data="adm:open_vars")],
+            [InlineKeyboardButton(text="👥 Меню сотрудников", callback_data="adm:open_employees")],
+            [InlineKeyboardButton(text="📘 Инструкции и команды", callback_data="adm:help")],
+            [InlineKeyboardButton(text="📄 Последние 50 строк лога", callback_data="adm:logs_tail")],
+            [InlineKeyboardButton(text="⬇️ Скачать лог", callback_data="adm:logs_file")],
+            [InlineKeyboardButton(text="♻️ Обновить", callback_data="adm:menu")],
+        ]
+>>>>>>> main
     )
 
 
@@ -898,7 +948,21 @@ def _back_main_kb() -> InlineKeyboardMarkup:
 
 def _employees_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
+<<<<<<< codex/implement-telegram-bot-for-team-activities-rcw4lm
         inline_keyboard=[[InlineKeyboardButton(text=text, callback_data=callback)] for text, callback in EMPLOYEE_MENU_BUTTONS]
+=======
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список сотрудников", callback_data="adm:employees_list")],
+            [InlineKeyboardButton(text="📅 Графики сотрудников", callback_data="adm:employees_schedule_menu")],
+            [InlineKeyboardButton(text="🗑 Удалить сотрудника", callback_data="adm:employees_remove_menu")],
+            [InlineKeyboardButton(text="➕ Добавить сотрудника (продажи)", callback_data="adm:emp_add_role:sales")],
+            [InlineKeyboardButton(text="➕ Добавить сотрудника (логистика)", callback_data="adm:emp_add_role:logistics")],
+            [InlineKeyboardButton(text="➕ Добавить сотрудника (финансы)", callback_data="adm:emp_add_role:finance")],
+            [InlineKeyboardButton(text="➕ Добавить сотрудника (общая роль)", callback_data="adm:emp_add_role:general")],
+            [InlineKeyboardButton(text="ℹ️ Как добавить: сотрудник пишет /myid", callback_data="adm:help")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back_main")],
+        ]
+>>>>>>> main
     )
 
 

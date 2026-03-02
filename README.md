@@ -187,6 +187,7 @@ sudo systemctl restart easyway-bot
 
 ---
 
+<<<<<<< codex/implement-telegram-bot-for-team-activities-rcw4lm
 
 ## Где лежат тексты и кнопки
 
@@ -198,6 +199,8 @@ sudo systemctl restart easyway-bot
 
 ---
 
+=======
+>>>>>>> main
 ## Структура проекта
 
 ```text
@@ -215,7 +218,10 @@ docker-compose.yml
 .env.example
 requirements.txt
 README.md
+<<<<<<< codex/implement-telegram-bot-for-team-activities-rcw4lm
   texts.py
+=======
+>>>>>>> main
 ```
 
 ---
