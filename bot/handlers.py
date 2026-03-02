@@ -91,10 +91,10 @@ def get_runtime_config(settings: Settings, db: Database) -> RuntimeConfig:
 def build_router(settings: Settings, db: Database) -> Router:
     router = Router()
 
-    @router.message(StateFilter(None), F.from_user != None)
+    @router.message(F.from_user != None)
     async def collect_activity(message: Message) -> None:
         user = message.from_user
-        if not user or user.id not in settings.employees:
+        if not user or user.is_bot or user.id not in settings.employees:
             return
         if message.text and message.text.startswith("/"):
             return
